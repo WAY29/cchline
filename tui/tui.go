@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/WAY29/cchline/config"
+	"github.com/WAY29/cchline/render"
+	"github.com/WAY29/cchline/segment"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -63,6 +65,18 @@ var (
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("240")).
 			Padding(1, 2)
+
+	// 预览区域样式
+	previewStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("86")).
+			Padding(0, 2).
+			MarginBottom(1)
+
+	// 预览标签样式
+	previewLabelStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("243")).
+			Italic(true)
 )
 
 // SeparatorPreset 分隔符预设
@@ -232,6 +246,98 @@ func NewModel(cfg *config.SimpleConfig) Model {
 	}
 }
 
+// generatePreview 生成状态栏预览
+func (m Model) generatePreview() string {
+	// Mock 数据映射
+	mockData := map[string]string{
+		"model":          "Opus 4.5",
+		"directory":      "myapp",
+		"git":            "main *",
+		"context_window": "15.6%",
+		"usage":          "↓31K ↑5K",
+		"cost":           "$0.15",
+		"session":        "1h23m",
+		"output_style":   "default",
+		"update":         "",
+		"cch_model":      "claude-3-opus",
+		"cch_provider":   "anthropic",
+		"cch_cost":       "$1.50/$10",
+		"cch_requests":   "123 reqs",
+		"cch_limits":     "5h:$0",
+	}
+
+	// 根据当前配置构建 SegmentResult 列表
+	var results []segment.SegmentResult
+
+	for _, name := range m.config.SegmentOrder {
+		// 处理换行分隔符
+		if name == config.LineBreakMarker {
+			results = append(results, segment.SegmentResult{
+				ID:   config.SegmentLineBreak,
+				Data: segment.SegmentData{},
+			})
+			continue
+		}
+
+		// 检查 segment 是否启用
+		if !m.isSegmentEnabled(name) {
+			continue
+		}
+
+		// 获取 mock 数据
+		mockValue, exists := mockData[name]
+		if !exists || mockValue == "" {
+			continue
+		}
+
+		// 构建 SegmentResult
+		results = append(results, segment.SegmentResult{
+			ID:   config.SegmentID(name),
+			Data: segment.SegmentData{Primary: mockValue},
+		})
+	}
+
+	// 使用 StatusLineGenerator 生成预览
+	generator := render.NewStatusLineGenerator(m.config)
+	return generator.Generate(results)
+}
+
+// isSegmentEnabled 检查 segment 是否启用
+func (m Model) isSegmentEnabled(name string) bool {
+	switch name {
+	case "model":
+		return m.config.Segments.Model
+	case "directory":
+		return m.config.Segments.Directory
+	case "git":
+		return m.config.Segments.Git
+	case "context_window":
+		return m.config.Segments.ContextWindow
+	case "usage":
+		return m.config.Segments.Usage
+	case "cost":
+		return m.config.Segments.Cost
+	case "session":
+		return m.config.Segments.Session
+	case "output_style":
+		return m.config.Segments.OutputStyle
+	case "update":
+		return m.config.Segments.Update
+	case "cch_model":
+		return m.config.Segments.CCHModel
+	case "cch_provider":
+		return m.config.Segments.CCHProvider
+	case "cch_cost":
+		return m.config.Segments.CCHCost
+	case "cch_requests":
+		return m.config.Segments.CCHRequests
+	case "cch_limits":
+		return m.config.Segments.CCHLimits
+	default:
+		return false
+	}
+}
+
 // Init 初始化
 func (m Model) Init() tea.Cmd {
 	return nil
@@ -379,6 +485,11 @@ func (m Model) View() string {
 	// 标题
 	title := titleStyle.Render(" CCHLine Configuration ")
 
+	// 预览区域
+	previewLabel := previewLabelStyle.Render("  Preview:")
+	previewContent := m.generatePreview()
+	preview := previewStyle.Render(previewContent)
+
 	// 内容
 	var content strings.Builder
 	for i, item := range m.items {
@@ -445,12 +556,12 @@ func (m Model) View() string {
 				status = disabledStyle.Render("○")
 			}
 			// 显示分隔符预览
-			preview := valueStyle.Render(fmt.Sprintf("%q", item.key))
+			separatorPreview := valueStyle.Render(fmt.Sprintf("%q", item.key))
 
 			if m.cursor == i {
-				line = fmt.Sprintf("%s%s %s  %s", cursor, status, selectedStyle.Render(item.label), preview)
+				line = fmt.Sprintf("%s%s %s  %s", cursor, status, selectedStyle.Render(item.label), separatorPreview)
 			} else {
-				line = fmt.Sprintf("%s%s %s  %s", cursor, status, normalStyle.Render(item.label), preview)
+				line = fmt.Sprintf("%s%s %s  %s", cursor, status, normalStyle.Render(item.label), separatorPreview)
 			}
 		} else if item.isLineBreak {
 			// 换行分隔符显示
@@ -533,7 +644,7 @@ func (m Model) View() string {
 	// 调试信息
 	debug := fmt.Sprintf("\n  DEBUG: Last key = %q", m.debugKey)
 
-	return fmt.Sprintf("\n%s\n%s\n%s\n%s%s%s\n", title, box, installStatus, help, status, debug)
+	return fmt.Sprintf("\n%s\n%s\n%s\n%s\n%s\n%s%s%s\n", title, previewLabel, preview, box, installStatus, help, status, debug)
 }
 
 // Run 运行 TUI
