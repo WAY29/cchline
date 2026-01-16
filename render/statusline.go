@@ -20,16 +20,37 @@ func NewStatusLineGenerator(cfg *config.SimpleConfig) *StatusLineGenerator {
 
 // Generate generates the status line from segment results
 func (g *StatusLineGenerator) Generate(segments []segment.SegmentResult) string {
-	var output []string
+	var lines [][]string
+	var currentLine []string
 
 	for _, seg := range segments {
+		// 遇到换行标记，保存当前行并开始新行
+		if seg.ID == config.SegmentLineBreak {
+			if len(currentLine) > 0 {
+				lines = append(lines, currentLine)
+				currentLine = nil
+			}
+			continue
+		}
+
 		rendered := g.renderSegment(seg)
 		if rendered != "" {
-			output = append(output, rendered)
+			currentLine = append(currentLine, rendered)
 		}
 	}
 
-	return strings.Join(output, g.config.Separator)
+	// 添加最后一行
+	if len(currentLine) > 0 {
+		lines = append(lines, currentLine)
+	}
+
+	// 将每行用分隔符连接，行之间用换行符连接
+	var result []string
+	for _, line := range lines {
+		result = append(result, strings.Join(line, g.config.Separator))
+	}
+
+	return strings.Join(result, "\n")
 }
 
 // renderSegment renders a single segment with theme and colors

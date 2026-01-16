@@ -93,6 +93,7 @@ type menuItem struct {
 	isSelected  bool // 分隔符是否被选中
 	isTextInput bool // 是否为文本输入项
 	textKey     string // 文本输入的配置键名 ("cch_url" 或 "cch_api_key")
+	isLineBreak bool   // 是否为换行分隔符
 }
 
 // Model TUI 模型
@@ -172,6 +173,16 @@ func NewModel(cfg *config.SimpleConfig) Model {
 
 	// 按照配置的顺序添加 segments
 	for _, name := range cfg.SegmentOrder {
+		// 处理换行分隔符
+		if name == config.LineBreakMarker {
+			items = append(items, menuItem{
+				label:       "Line Break",
+				key:         config.LineBreakMarker,
+				isLineBreak: true,
+			})
+			continue
+		}
+
 		if label, exists := segmentLabels[name]; exists {
 			items = append(items, menuItem{
 				label:   label,
@@ -291,6 +302,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case MoveDownKey:
 			m.moveSegment(1)
+
+		case "a":
+			m.insertLineBreak()
+
+		case "d":
+			m.deleteLineBreak()
 
 		case "enter", " ":
 			// 检查是否是文本输入项
@@ -419,6 +436,68 @@ func (m *Model) moveSegment(delta int) {
 	targetCursor := m.cursor + delta
 	m.items[m.cursor], m.items[targetCursor] = m.items[targetCursor], m.items[m.cursor]
 	m.cursor = targetCursor
+
+	// 更新配置中的 SegmentOrder
+	m.updateSegmentOrder()
+}
+
+// insertLineBreak 在当前 segment 后插入换行分隔符
+func (m *Model) insertLineBreak() {
+	item := m.items[m.cursor]
+	// 只能在 segment 项后插入（非 header、非 separator、非 theme、非 textInput、非 lineBreak）
+	if item.isHeader || item.isSeparator || item.key == "theme" || item.isTextInput || item.isLineBreak {
+		return
+	}
+
+	// 找到 SEGMENTS header 和 CCH SETTINGS header 的位置
+	segmentsStart := -1
+	segmentsEnd := -1
+	for i, it := range m.items {
+		if it.isHeader && it.label == "SEGMENTS" {
+			segmentsStart = i + 1
+		} else if it.isHeader && it.label == "CCH SETTINGS" {
+			segmentsEnd = i
+			break
+		}
+	}
+	if segmentsStart < 0 || m.cursor < segmentsStart || m.cursor >= segmentsEnd {
+		return
+	}
+
+	// 在当前位置后插入换行分隔符
+	newItem := menuItem{
+		label:       "Line Break",
+		key:         config.LineBreakMarker,
+		isLineBreak: true,
+	}
+
+	// 插入到 cursor+1 位置
+	insertPos := m.cursor + 1
+	m.items = append(m.items[:insertPos], append([]menuItem{newItem}, m.items[insertPos:]...)...)
+
+	// 更新配置中的 SegmentOrder
+	m.updateSegmentOrder()
+}
+
+// deleteLineBreak 删除当前换行分隔符
+func (m *Model) deleteLineBreak() {
+	item := m.items[m.cursor]
+	// 只能删除换行分隔符
+	if !item.isLineBreak {
+		return
+	}
+
+	// 删除当前项
+	m.items = append(m.items[:m.cursor], m.items[m.cursor+1:]...)
+
+	// 调整光标位置
+	if m.cursor >= len(m.items) {
+		m.cursor = len(m.items) - 1
+	}
+	// 跳过 header
+	for m.cursor >= 0 && m.items[m.cursor].isHeader {
+		m.cursor--
+	}
 
 	// 更新配置中的 SegmentOrder
 	m.updateSegmentOrder()
@@ -616,6 +695,13 @@ func (m Model) View() string {
 			} else {
 				line = fmt.Sprintf("%s%s %s  %s", cursor, status, normalStyle.Render(item.label), preview)
 			}
+		} else if item.isLineBreak {
+			// 换行分隔符显示
+			if m.cursor == i {
+				line = fmt.Sprintf("%s%s", cursor, selectedStyle.Render("↵ Line Break"))
+			} else {
+				line = fmt.Sprintf("%s%s", cursor, disabledStyle.Render("↵ Line Break"))
+			}
 		} else {
 			// Segment 开关显示
 			var status string
@@ -651,7 +737,9 @@ func (m Model) View() string {
 			keyStyle.Render("↑↓") + " Navigate  " +
 				keyStyle.Render("Space") + " Toggle  " +
 				keyStyle.Render("Enter") + " Edit Text\n" +
-				keyStyle.Render(ReorderKeyHint) + " Move Segments  " +
+				keyStyle.Render(ReorderKeyHint) + " Move  " +
+				keyStyle.Render("a") + " Add Break  " +
+				keyStyle.Render("d") + " Del Break  " +
 				keyStyle.Render("Esc") + " Save & Exit",
 		)
 	}

@@ -182,6 +182,15 @@ func collectAllSegments(cfg *config.SimpleConfig, input *config.InputData, cchCl
 
 	// Collect segments in the order specified by cfg.SegmentOrder
 	for _, name := range cfg.SegmentOrder {
+		// Handle line break marker
+		if name == config.LineBreakMarker {
+			results = append(results, segment.SegmentResult{
+				ID:   config.SegmentLineBreak,
+				Data: segment.SegmentData{},
+			})
+			continue
+		}
+
 		collector, exists := collectorMap[name]
 		if !exists || !collector.enabled {
 			continue

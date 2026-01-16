@@ -7,6 +7,9 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+// LineBreakMarker 换行分隔符标记
+const LineBreakMarker = "---"
+
 // DefaultSegmentOrder 定义默认的 segment 显示顺序
 var DefaultSegmentOrder = []string{
 	"model",

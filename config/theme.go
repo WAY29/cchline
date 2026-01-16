@@ -28,6 +28,8 @@ const (
 	SegmentCCHCost     SegmentID = "cch_cost"
 	SegmentCCHRequests SegmentID = "cch_requests"
 	SegmentCCHLimits   SegmentID = "cch_limits"
+	// Line Break
+	SegmentLineBreak SegmentID = "---"
 )
 
 // ThemeMode 主题模式
