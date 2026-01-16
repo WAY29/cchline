@@ -2,11 +2,8 @@ package tui
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
-	"github.com/BurntSushi/toml"
 	"github.com/WAY29/cchline/config"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -89,24 +86,26 @@ type menuItem struct {
 	key         string
 	enabled     bool
 	isHeader    bool
-	isSeparator bool // 是否为分隔符选项
-	isSelected  bool // 分隔符是否被选中
-	isTextInput bool // 是否为文本输入项
+	isSeparator bool   // 是否为分隔符选项
+	isSelected  bool   // 分隔符是否被选中
+	isTextInput bool   // 是否为文本输入项
 	textKey     string // 文本输入的配置键名 ("cch_url" 或 "cch_api_key")
 	isLineBreak bool   // 是否为换行分隔符
 }
 
 // Model TUI 模型
 type Model struct {
-	config       *config.SimpleConfig
-	cursor       int
-	items        []menuItem
-	quitting     bool
-	width        int
-	height       int
-	debugKey     string // 调试：显示最后按下的按键
-	editing      bool // 是否处于编辑模式
-	textInputs   map[string]textinput.Model // 文本输入组件
+	config        *config.SimpleConfig
+	cursor        int
+	items         []menuItem
+	quitting      bool
+	width         int
+	height        int
+	debugKey      string                     // 调试：显示最后按下的按键
+	editing       bool                       // 是否处于编辑模式
+	textInputs    map[string]textinput.Model // 文本输入组件
+	confirmAction string                     // 待确认的操作: "install" 或 "uninstall"
+	statusMessage string                     // 操作结果消息
 }
 
 // NewModel 创建新的 TUI 模型
@@ -283,6 +282,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// 确认模式的按键处理
+		if m.confirmAction != "" {
+			switch msg.String() {
+			case "y", "Y":
+				// 执行确认的操作
+				var err error
+				if m.confirmAction == "install" {
+					err = m.installStatusLine()
+					if err == nil {
+						m.statusMessage = "✓ 安装成功"
+					} else {
+						m.statusMessage = "✗ " + err.Error()
+					}
+				} else if m.confirmAction == "uninstall" {
+					err = m.uninstallStatusLine()
+					if err == nil {
+						m.statusMessage = "✓ 卸载成功"
+					} else {
+						m.statusMessage = "✗ " + err.Error()
+					}
+				}
+				m.confirmAction = ""
+				return m, nil
+			case "n", "N", "esc":
+				// 取消操作
+				m.confirmAction = ""
+				m.statusMessage = ""
+				return m, nil
+			default:
+				// 忽略其他按键
+				return m, nil
+			}
+		}
+
 		// 非编辑模式的按键处理
 		switch msg.String() {
 		case "ctrl+c", "esc":
@@ -309,6 +342,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "d":
 			m.deleteLineBreak()
 
+		case "i":
+			// 安装确认
+			m.confirmAction = "install"
+			m.statusMessage = ""
+
+		case "u":
+			// 卸载确认
+			m.confirmAction = "uninstall"
+			m.statusMessage = ""
+
 		case "enter", " ":
 			// 检查是否是文本输入项
 			item := m.items[m.cursor]
@@ -325,292 +368,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
-}
-
-// saveTextInputValue 保存文本输入的值到配置
-func (m *Model) saveTextInputValue() {
-	item := m.items[m.cursor]
-	if !item.isTextInput {
-		return
-	}
-
-	input := m.textInputs[item.textKey]
-	value := input.Value()
-
-	switch item.textKey {
-	case "cch_url":
-		m.config.CCHURL = value
-	case "cch_api_key":
-		m.config.CCHApiKey = value
-	}
-}
-
-// moveCursor 移动光标
-func (m *Model) moveCursor(delta int) {
-	newCursor := m.cursor + delta
-
-	// 边界检查，处理初始越界
-	if newCursor < 0 || newCursor >= len(m.items) {
-		// 直接越界，触发循环导航
-		if delta < 0 {
-			// 向上越界，跳到最后一个非 header 项
-			newCursor = len(m.items) - 1
-			for newCursor >= 0 && m.items[newCursor].isHeader {
-				newCursor--
-			}
-		} else {
-			// 向下越界，跳到第一个非 header 项
-			newCursor = 0
-			for newCursor < len(m.items) && m.items[newCursor].isHeader {
-				newCursor++
-			}
-		}
-		if newCursor >= 0 && newCursor < len(m.items) {
-			m.cursor = newCursor
-		}
-		return
-	}
-
-	// 跳过 header
-	for newCursor >= 0 && newCursor < len(m.items) && m.items[newCursor].isHeader {
-		newCursor += delta
-	}
-
-	// 跳过 header 后越界，触发循环导航
-	if newCursor < 0 {
-		// 向上越界，跳到最后一个非 header 项
-		newCursor = len(m.items) - 1
-		for newCursor >= 0 && m.items[newCursor].isHeader {
-			newCursor--
-		}
-	} else if newCursor >= len(m.items) {
-		// 向下越界，跳到第一个非 header 项
-		newCursor = 0
-		for newCursor < len(m.items) && m.items[newCursor].isHeader {
-			newCursor++
-		}
-	}
-
-	if newCursor >= 0 && newCursor < len(m.items) {
-		m.cursor = newCursor
-	}
-}
-
-// moveSegment 移动 segment 顺序
-func (m *Model) moveSegment(delta int) {
-	item := m.items[m.cursor]
-	// 只能移动 segment 项（非 header、非 separator、非 theme、非 textInput）
-	if item.isHeader || item.isSeparator || item.key == "theme" || item.isTextInput {
-		return
-	}
-
-	// 找到 SEGMENTS header 和 CCH SETTINGS header 的位置
-	segmentsStart := -1
-	segmentsEnd := -1
-	for i, it := range m.items {
-		if it.isHeader && it.label == "SEGMENTS" {
-			segmentsStart = i + 1
-		} else if it.isHeader && it.label == "CCH SETTINGS" {
-			segmentsEnd = i
-			break
-		}
-	}
-	if segmentsStart < 0 {
-		return
-	}
-	if segmentsEnd < 0 {
-		segmentsEnd = len(m.items)
-	}
-
-	// 计算当前 segment 在 segment 列表中的相对位置
-	segmentIndex := m.cursor - segmentsStart
-	newIndex := segmentIndex + delta
-
-	// 边界检查：只能在 SEGMENTS 区域内移动
-	segmentCount := segmentsEnd - segmentsStart
-	if newIndex < 0 || newIndex >= segmentCount {
-		return
-	}
-
-	// 交换 items
-	targetCursor := m.cursor + delta
-	m.items[m.cursor], m.items[targetCursor] = m.items[targetCursor], m.items[m.cursor]
-	m.cursor = targetCursor
-
-	// 更新配置中的 SegmentOrder
-	m.updateSegmentOrder()
-}
-
-// insertLineBreak 在当前 segment 后插入换行分隔符
-func (m *Model) insertLineBreak() {
-	item := m.items[m.cursor]
-	// 只能在 segment 项后插入（非 header、非 separator、非 theme、非 textInput、非 lineBreak）
-	if item.isHeader || item.isSeparator || item.key == "theme" || item.isTextInput || item.isLineBreak {
-		return
-	}
-
-	// 找到 SEGMENTS header 和 CCH SETTINGS header 的位置
-	segmentsStart := -1
-	segmentsEnd := -1
-	for i, it := range m.items {
-		if it.isHeader && it.label == "SEGMENTS" {
-			segmentsStart = i + 1
-		} else if it.isHeader && it.label == "CCH SETTINGS" {
-			segmentsEnd = i
-			break
-		}
-	}
-	if segmentsStart < 0 || m.cursor < segmentsStart || m.cursor >= segmentsEnd {
-		return
-	}
-
-	// 在当前位置后插入换行分隔符
-	newItem := menuItem{
-		label:       "Line Break",
-		key:         config.LineBreakMarker,
-		isLineBreak: true,
-	}
-
-	// 插入到 cursor+1 位置
-	insertPos := m.cursor + 1
-	m.items = append(m.items[:insertPos], append([]menuItem{newItem}, m.items[insertPos:]...)...)
-
-	// 更新配置中的 SegmentOrder
-	m.updateSegmentOrder()
-}
-
-// deleteLineBreak 删除当前换行分隔符
-func (m *Model) deleteLineBreak() {
-	item := m.items[m.cursor]
-	// 只能删除换行分隔符
-	if !item.isLineBreak {
-		return
-	}
-
-	// 删除当前项
-	m.items = append(m.items[:m.cursor], m.items[m.cursor+1:]...)
-
-	// 调整光标位置
-	if m.cursor >= len(m.items) {
-		m.cursor = len(m.items) - 1
-	}
-	// 跳过 header
-	for m.cursor >= 0 && m.items[m.cursor].isHeader {
-		m.cursor--
-	}
-
-	// 更新配置中的 SegmentOrder
-	m.updateSegmentOrder()
-}
-
-// updateSegmentOrder 更新配置中的 segment 顺序
-func (m *Model) updateSegmentOrder() {
-	// 找到 SEGMENTS header 和 CCH SETTINGS header 的位置
-	segmentsStart := -1
-	segmentsEnd := -1
-	for i, it := range m.items {
-		if it.isHeader && it.label == "SEGMENTS" {
-			segmentsStart = i + 1
-		} else if it.isHeader && it.label == "CCH SETTINGS" {
-			segmentsEnd = i
-			break
-		}
-	}
-	if segmentsStart < 0 {
-		return
-	}
-	if segmentsEnd < 0 {
-		segmentsEnd = len(m.items)
-	}
-
-	// 重建 SegmentOrder（只包含 SEGMENTS 区域内的项）
-	var order []string
-	for i := segmentsStart; i < segmentsEnd; i++ {
-		if !m.items[i].isHeader {
-			order = append(order, m.items[i].key)
-		}
-	}
-	m.config.SegmentOrder = order
-}
-
-// toggleItem 切换选项
-func (m *Model) toggleItem() {
-	item := &m.items[m.cursor]
-	if item.isHeader {
-		return
-	}
-
-	// 处理分隔符选择（单选）
-	if item.isSeparator {
-		// 取消其他分隔符的选中状态
-		for i := range m.items {
-			if m.items[i].isSeparator {
-				m.items[i].isSelected = false
-			}
-		}
-		item.isSelected = true
-		m.config.Separator = item.key
-		return
-	}
-
-	item.enabled = !item.enabled
-
-	// 更新配置
-	switch item.key {
-	case "theme":
-		if item.enabled {
-			m.config.Theme = config.ThemeModeNerdFont
-		} else {
-			m.config.Theme = config.ThemeModeDefault
-		}
-	case "model":
-		m.config.Segments.Model = item.enabled
-	case "directory":
-		m.config.Segments.Directory = item.enabled
-	case "git":
-		m.config.Segments.Git = item.enabled
-	case "context_window":
-		m.config.Segments.ContextWindow = item.enabled
-	case "usage":
-		m.config.Segments.Usage = item.enabled
-	case "cost":
-		m.config.Segments.Cost = item.enabled
-	case "session":
-		m.config.Segments.Session = item.enabled
-	case "output_style":
-		m.config.Segments.OutputStyle = item.enabled
-	case "update":
-		m.config.Segments.Update = item.enabled
-	// CCH Segments
-	case "cch_model":
-		m.config.Segments.CCHModel = item.enabled
-	case "cch_provider":
-		m.config.Segments.CCHProvider = item.enabled
-	case "cch_cost":
-		m.config.Segments.CCHCost = item.enabled
-	case "cch_requests":
-		m.config.Segments.CCHRequests = item.enabled
-	case "cch_limits":
-		m.config.Segments.CCHLimits = item.enabled
-	}
-}
-
-// saveConfig 保存配置
-func (m *Model) saveConfig() error {
-	configDir := filepath.Join(os.Getenv("HOME"), ".claude", "cchline")
-	if err := os.MkdirAll(configDir, 0755); err != nil {
-		return err
-	}
-
-	configPath := filepath.Join(configDir, "config.toml")
-	file, err := os.Create(configPath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	encoder := toml.NewEncoder(file)
-	return encoder.Encode(m.config)
 }
 
 // View 渲染视图
@@ -724,9 +481,30 @@ func (m Model) View() string {
 	// 包装内容
 	box := boxStyle.Render(content.String())
 
+	// 安装状态
+	var installStatus string
+	if isInstalled() {
+		installStatus = "  " + enabledStyle.Render("● 已安装")
+	} else {
+		installStatus = "  " + disabledStyle.Render("○ 未安装")
+	}
+
 	// 帮助栏
 	var help string
-	if m.editing {
+	if m.confirmAction != "" {
+		// 确认模式
+		var actionText string
+		if m.confirmAction == "install" {
+			actionText = "安装 cchline 到 Claude Code?"
+		} else {
+			actionText = "从 Claude Code 卸载 cchline?"
+		}
+		help = helpBarStyle.Render(
+			valueStyle.Render(actionText) + "  " +
+				keyStyle.Render("y") + " 确认  " +
+				keyStyle.Render("n") + " 取消",
+		)
+	} else if m.editing {
 		help = helpBarStyle.Render(
 			keyStyle.Render("Enter") + " Save  " +
 				keyStyle.Render("Ctrl+U") + " Clear  " +
@@ -739,15 +517,23 @@ func (m Model) View() string {
 				keyStyle.Render("Enter") + " Edit Text\n" +
 				keyStyle.Render(ReorderKeyHint) + " Move  " +
 				keyStyle.Render("a") + " Add Break  " +
-				keyStyle.Render("d") + " Del Break  " +
-				keyStyle.Render("Esc") + " Save & Exit",
+				keyStyle.Render("d") + " Del Break\n" +
+				keyStyle.Render("i") + " Install  " +
+				keyStyle.Render("u") + " Uninstall  " +
+				keyStyle.Render("Esc") + " Exit",
 		)
+	}
+
+	// 状态消息
+	var status string
+	if m.statusMessage != "" {
+		status = "\n  " + m.statusMessage
 	}
 
 	// 调试信息
 	debug := fmt.Sprintf("\n  DEBUG: Last key = %q", m.debugKey)
 
-	return fmt.Sprintf("\n%s\n%s\n%s%s\n", title, box, help, debug)
+	return fmt.Sprintf("\n%s\n%s\n%s\n%s%s%s\n", title, box, installStatus, help, status, debug)
 }
 
 // Run 运行 TUI
