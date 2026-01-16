@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 	"github.com/WAY29/cchline/config"
@@ -401,6 +403,27 @@ func isInstalled() bool {
 		return false
 	}
 
-	_, exists := settings["statusLine"]
-	return exists
+	statusLine, exists := settings["statusLine"]
+	if !exists {
+		return false
+	}
+
+	// 提取 command 字段
+	statusLineMap, ok := statusLine.(map[string]any)
+	if !ok {
+		return false
+	}
+
+	command, ok := statusLineMap["command"].(string)
+	if !ok || command == "" {
+		return false
+	}
+
+	// 执行 command -v 检查输出是否包含 cchline
+	out, err := exec.Command(command, "-v").Output()
+	if err != nil {
+		return false
+	}
+
+	return strings.Contains(string(out), "cchline")
 }
