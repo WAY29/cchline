@@ -141,7 +141,7 @@ cch_api_key = "your-api-key"
 ## 依赖
 
 - [BurntSushi/toml](https://github.com/BurntSushi/toml) - TOML 解析
-- [fatih/color](https://github.com/fatih/color) - ANSI 颜色
+- [lipgloss](https://github.com/charmbracelet/lipgloss) / [termenv](https://github.com/muesli/termenv) - ANSI 颜色
 - [charmbracelet/bubbletea](https://github.com/charmbracelet/bubbletea) - TUI 框架
 - [charmbracelet/lipgloss](https://github.com/charmbracelet/lipgloss) - TUI 样式
 

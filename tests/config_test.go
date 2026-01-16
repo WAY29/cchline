@@ -5,7 +5,8 @@ import (
 	"testing"
 
 	"github.com/WAY29/cchline/config"
-	"github.com/fatih/color"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // TestThemeModeConstants verifies ThemeMode constant values
@@ -386,9 +387,9 @@ func TestGetSegmentThemeSameColors(t *testing.T) {
 // TestApplyColorWithValidColor verifies ApplyColor applies color to text
 func TestApplyColorWithValidColor(t *testing.T) {
 	testText := "test"
-	testColor := color.New(color.FgRed)
+	testColor := lipgloss.Color("1")
 
-	result := config.ApplyColor(testText, testColor)
+	result := config.ApplyColor(testText, &testColor)
 
 	// Result should contain ANSI escape codes
 	if result == testText {
@@ -414,28 +415,12 @@ func TestApplyColorWithNilColor(t *testing.T) {
 
 // TestApplyColorWithEmptyString verifies ApplyColor handles empty string
 func TestApplyColorWithEmptyString(t *testing.T) {
-	testColor := color.New(color.FgGreen)
+	testColor := lipgloss.Color("2")
 
-	result := config.ApplyColor("", testColor)
+	result := config.ApplyColor("", &testColor)
 
-	if result == "" {
-		t.Errorf("expected colored empty string, got empty string")
-	}
-}
-
-// TestApplyColorWithMultipleColors verifies ApplyColor works with multiple color attributes
-func TestApplyColorWithMultipleColors(t *testing.T) {
-	testText := "bold red"
-	testColor := color.New(color.FgRed, color.Bold)
-
-	result := config.ApplyColor(testText, testColor)
-
-	if result == testText {
-		t.Errorf("expected colored text with ANSI codes, got plain text")
-	}
-
-	if !strings.Contains(result, testText) {
-		t.Errorf("expected result to contain original text %q, got %q", testText, result)
+	if ansi.Strip(result) != "" {
+		t.Errorf("expected empty string after stripping ANSI, got %q", ansi.Strip(result))
 	}
 }
 
@@ -447,20 +432,20 @@ func TestDefaultSegmentOrder(t *testing.T) {
 	}
 
 	expectedSegments := map[string]bool{
-		"model":           true,
-		"directory":       true,
-		"git":             true,
-		"context_window":  true,
-		"usage":           true,
-		"cost":            true,
-		"session":         true,
-		"output_style":    true,
-		"update":          true,
-		"cch_model":       true,
-		"cch_provider":    true,
-		"cch_cost":        true,
-		"cch_requests":    true,
-		"cch_limits":      true,
+		"model":          true,
+		"directory":      true,
+		"git":            true,
+		"context_window": true,
+		"usage":          true,
+		"cost":           true,
+		"session":        true,
+		"output_style":   true,
+		"update":         true,
+		"cch_model":      true,
+		"cch_provider":   true,
+		"cch_cost":       true,
+		"cch_requests":   true,
+		"cch_limits":     true,
 	}
 
 	foundSegments := make(map[string]bool)

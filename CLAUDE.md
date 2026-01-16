@@ -116,7 +116,7 @@ CCHLine 支持连接 CCH 服务，配置方式：
 ## 依赖
 
 - `github.com/BurntSushi/toml` - TOML 解析
-- `github.com/fatih/color` - ANSI 颜色
+- `github.com/charmbracelet/lipgloss` / `github.com/muesli/termenv` - ANSI 颜色
 - `github.com/charmbracelet/bubbletea` - TUI 框架
 - `github.com/charmbracelet/lipgloss` - TUI 样式
 - `github.com/charmbracelet/bubbles/textinput` - TUI 文本输入组件

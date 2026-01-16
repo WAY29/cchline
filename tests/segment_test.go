@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/fatih/color"
 	"github.com/WAY29/cchline/config"
 	"github.com/WAY29/cchline/segment"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // TestModelSegmentCollect tests the ModelSegment.Collect() method
@@ -695,8 +695,8 @@ func TestSegmentDataEmptyMetadata(t *testing.T) {
 // TestSegmentDataWithInitializedMetadata tests SegmentData with initialized metadata
 func TestSegmentDataWithInitializedMetadata(t *testing.T) {
 	data := segment.SegmentData{
-		Primary:   "test",
-		Metadata:  make(map[string]string),
+		Primary:  "test",
+		Metadata: make(map[string]string),
 	}
 
 	if data.Metadata == nil {
@@ -912,9 +912,10 @@ func TestApplyColor(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var c *color.Color
+			var c *lipgloss.Color
 			if tt.hasColor {
-				c = color.New(color.FgGreen)
+				cc := lipgloss.Color("2")
+				c = &cc
 			}
 
 			result := config.ApplyColor(tt.text, c)
@@ -1114,9 +1115,9 @@ func TestOutputStyleSegmentWithEmptyString(t *testing.T) {
 // TestSegmentResultWithDifferentIDs tests SegmentResult with different segment IDs
 func TestSegmentResultWithDifferentIDs(t *testing.T) {
 	tests := []struct {
-		name      string
-		id        config.SegmentID
-		data      string
+		name string
+		id   config.SegmentID
+		data string
 	}{
 		{
 			name: "Model segment result",
@@ -1300,10 +1301,12 @@ func TestOutputStyleInfoStructure(t *testing.T) {
 
 // TestSegmentThemeFields tests SegmentTheme structure fields
 func TestSegmentThemeFields(t *testing.T) {
+	iconColor := lipgloss.Color("6")
+	textColor := lipgloss.Color("2")
 	theme := config.SegmentTheme{
 		Icon:      "🤖",
-		IconColor: color.New(color.FgCyan),
-		TextColor: color.New(color.FgGreen),
+		IconColor: &iconColor,
+		TextColor: &textColor,
 		Bold:      true,
 	}
 
@@ -1962,24 +1965,24 @@ func TestOutputStyleSegmentNonEmptyCheck(t *testing.T) {
 	styleSegment := &segment.OutputStyleSegment{}
 
 	tests := []struct {
-		name     string
-		style    string
-		isEmpty  bool
+		name    string
+		style   string
+		isEmpty bool
 	}{
 		{
-			name:     "Non-empty style",
-			style:    "markdown",
-			isEmpty:  false,
+			name:    "Non-empty style",
+			style:   "markdown",
+			isEmpty: false,
 		},
 		{
-			name:     "Empty style",
-			style:    "",
-			isEmpty:  true,
+			name:    "Empty style",
+			style:   "",
+			isEmpty: true,
 		},
 		{
-			name:     "Whitespace style",
-			style:    " ",
-			isEmpty:  false,
+			name:    "Whitespace style",
+			style:   " ",
+			isEmpty: false,
 		},
 	}
 
@@ -2066,24 +2069,24 @@ func TestCostSegmentNonZeroCheck(t *testing.T) {
 	costSegment := &segment.CostSegment{}
 
 	tests := []struct {
-		name     string
-		cost     float64
-		isEmpty  bool
+		name    string
+		cost    float64
+		isEmpty bool
 	}{
 		{
-			name:     "Positive cost",
-			cost:     0.01,
-			isEmpty:  false,
+			name:    "Positive cost",
+			cost:    0.01,
+			isEmpty: false,
 		},
 		{
-			name:     "Zero cost",
-			cost:     0.0,
-			isEmpty:  true,
+			name:    "Zero cost",
+			cost:    0.0,
+			isEmpty: true,
 		},
 		{
-			name:     "Negative cost",
-			cost:     -0.01,
-			isEmpty:  false,
+			name:    "Negative cost",
+			cost:    -0.01,
+			isEmpty: false,
 		},
 	}
 

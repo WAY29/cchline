@@ -1,12 +1,28 @@
 package config
 
 import (
-	"github.com/fatih/color"
+	"os"
+	"sync"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
-func init() {
-	// 强制启用颜色输出，即使 stdout 不是 TTY
-	color.NoColor = false
+var (
+	statuslineRendererOnce sync.Once
+	statuslineRenderer     *lipgloss.Renderer
+)
+
+func getStatuslineRenderer() *lipgloss.Renderer {
+	statuslineRendererOnce.Do(func() {
+		// 强制启用颜色输出，即使 stdout 不是 TTY
+		statuslineRenderer = lipgloss.NewRenderer(
+			os.Stdout,
+			termenv.WithUnsafe(),
+			termenv.WithProfile(termenv.ANSI),
+		)
+	})
+	return statuslineRenderer
 }
 
 // SegmentID 段类型枚举
@@ -43,22 +59,22 @@ const (
 // SegmentTheme 单个 Segment 的主题配置
 type SegmentTheme struct {
 	Icon      string
-	IconColor *color.Color
-	TextColor *color.Color
-	BgColor   *color.Color
+	IconColor *lipgloss.Color
+	TextColor *lipgloss.Color
+	BgColor   *lipgloss.Color
 	Bold      bool
 }
 
 // 预定义颜色 (ANSI 16 色)
 var (
-	colorLightCyan    = color.New(color.FgHiCyan)    // 14
-	colorLightYellow  = color.New(color.FgHiYellow)  // 11
-	colorLightGreen   = color.New(color.FgHiGreen)   // 10
-	colorLightBlue    = color.New(color.FgHiBlue)    // 12
-	colorLightMagenta = color.New(color.FgHiMagenta) // 13
-	colorYellow       = color.New(color.FgYellow)    // 3
-	colorGreen        = color.New(color.FgGreen)     // 2
-	colorCyan         = color.New(color.FgCyan)      // 6
+	colorLightCyan    = lipgloss.Color("14") // 14
+	colorLightYellow  = lipgloss.Color("11") // 11
+	colorLightGreen   = lipgloss.Color("10") // 10
+	colorLightBlue    = lipgloss.Color("12") // 12
+	colorLightMagenta = lipgloss.Color("13") // 13
+	colorYellow       = lipgloss.Color("3")  // 3
+	colorGreen        = lipgloss.Color("2")  // 2
+	colorCyan         = lipgloss.Color("6")  // 6
 )
 
 // Default 主题图标 (Emoji)
@@ -101,25 +117,25 @@ const (
 
 // segmentColors 定义各 Segment 的颜色配置 (与图标无关)
 var segmentColors = map[SegmentID]struct {
-	IconColor *color.Color
-	TextColor *color.Color
+	IconColor *lipgloss.Color
+	TextColor *lipgloss.Color
 	Bold      bool
 }{
-	SegmentModel:         {colorLightCyan, colorLightCyan, true},
-	SegmentDirectory:     {colorLightYellow, colorLightGreen, true},
-	SegmentGit:           {colorLightBlue, colorLightBlue, true},
-	SegmentContextWindow: {colorLightMagenta, colorLightMagenta, true},
-	SegmentUsage:         {colorLightCyan, colorLightCyan, false},
-	SegmentCost:          {colorYellow, colorYellow, true},
-	SegmentSession:       {colorGreen, colorGreen, true},
-	SegmentOutputStyle:   {colorCyan, colorCyan, true},
-	SegmentUpdate:        {colorLightYellow, colorLightYellow, false},
+	SegmentModel:         {&colorLightCyan, &colorLightCyan, true},
+	SegmentDirectory:     {&colorLightYellow, &colorLightGreen, true},
+	SegmentGit:           {&colorLightBlue, &colorLightBlue, true},
+	SegmentContextWindow: {&colorLightMagenta, &colorLightMagenta, true},
+	SegmentUsage:         {&colorLightCyan, &colorLightCyan, false},
+	SegmentCost:          {&colorYellow, &colorYellow, true},
+	SegmentSession:       {&colorGreen, &colorGreen, true},
+	SegmentOutputStyle:   {&colorCyan, &colorCyan, true},
+	SegmentUpdate:        {&colorLightYellow, &colorLightYellow, false},
 	// CCH Segments
-	SegmentCCHModel:    {colorLightMagenta, colorLightMagenta, true},
-	SegmentCCHProvider: {colorLightBlue, colorLightBlue, true},
-	SegmentCCHCost:     {colorYellow, colorYellow, true},
-	SegmentCCHRequests: {colorLightGreen, colorLightGreen, false},
-	SegmentCCHLimits:   {colorLightCyan, colorLightCyan, false},
+	SegmentCCHModel:    {&colorLightMagenta, &colorLightMagenta, true},
+	SegmentCCHProvider: {&colorLightBlue, &colorLightBlue, true},
+	SegmentCCHCost:     {&colorYellow, &colorYellow, true},
+	SegmentCCHRequests: {&colorLightGreen, &colorLightGreen, false},
+	SegmentCCHLimits:   {&colorLightCyan, &colorLightCyan, false},
 }
 
 // defaultIcons Default 主题图标映射
@@ -186,17 +202,17 @@ func GetSegmentTheme(id SegmentID, mode ThemeMode) SegmentTheme {
 }
 
 // ApplyColor applies foreground color to text
-func ApplyColor(text string, c *color.Color) string {
+func ApplyColor(text string, c *lipgloss.Color) string {
 	if c == nil {
 		return text
 	}
-	return c.Sprint(text)
+	return getStatuslineRenderer().NewStyle().Foreground(*c).Render(text)
 }
 
 // ApplyBackground applies background color to text
-func ApplyBackground(text string, c *color.Color) string {
+func ApplyBackground(text string, c *lipgloss.Color) string {
 	if c == nil {
 		return text
 	}
-	return c.Sprint(text)
+	return getStatuslineRenderer().NewStyle().Background(*c).Render(text)
 }
