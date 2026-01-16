@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/WAY29/cchline/cch"
 	"github.com/WAY29/cchline/config"
 	"github.com/WAY29/cchline/render"
 	"github.com/WAY29/cchline/segment"
@@ -19,6 +20,9 @@ var (
 
 	configMode  = flag.Bool("c", false, "Open interactive configuration")
 	versionMode = flag.Bool("v", false, "Show version")
+	// CCH flags
+	cchApiKey = flag.String("k", "", "CCH API key")
+	cchURL    = flag.String("u", "", "CCH server URL")
 )
 
 func main() {
@@ -56,7 +60,23 @@ func main() {
 		fmt.Println("  claude-code | cchline    Run status line")
 		fmt.Println("  cchline -c               Open configuration")
 		fmt.Println("  cchline -v               Show version")
+		fmt.Println("  cchline -k KEY -u URL    Use CCH API")
 		return
+	}
+
+	// Initialize CCH client if configured
+	var cchClient *cch.Client
+	apiKey := *cchApiKey
+	url := *cchURL
+	// Fallback to config file values
+	if apiKey == "" {
+		apiKey = cfg.CCHApiKey
+	}
+	if url == "" {
+		url = cfg.CCHURL
+	}
+	if apiKey != "" && url != "" {
+		cchClient = cch.NewClient(url, apiKey)
 	}
 
 	// Read stdin JSON
@@ -68,7 +88,7 @@ func main() {
 	}
 
 	// Collect all segment data
-	segments := collectAllSegments(cfg, &input)
+	segments := collectAllSegments(cfg, &input, cchClient)
 
 	// Generate status line
 	generator := render.NewStatusLineGenerator(cfg)
@@ -78,7 +98,7 @@ func main() {
 	fmt.Print(output)
 }
 
-func collectAllSegments(cfg *config.SimpleConfig, input *config.InputData) []segment.SegmentResult {
+func collectAllSegments(cfg *config.SimpleConfig, input *config.InputData, cchClient *cch.Client) []segment.SegmentResult {
 	// Create a map of segment ID to collector
 	collectorMap := map[string]struct {
 		id      config.SegmentID
@@ -129,6 +149,32 @@ func collectAllSegments(cfg *config.SimpleConfig, input *config.InputData) []seg
 			id:      config.SegmentUpdate,
 			enabled: cfg.Segments.Update,
 			collect: (&segment.UpdateSegment{}).Collect,
+		},
+		// CCH Segments
+		"cch_model": {
+			id:      config.SegmentCCHModel,
+			enabled: cfg.Segments.CCHModel,
+			collect: (&segment.CCHModelSegment{Client: cchClient}).Collect,
+		},
+		"cch_provider": {
+			id:      config.SegmentCCHProvider,
+			enabled: cfg.Segments.CCHProvider,
+			collect: (&segment.CCHProviderSegment{Client: cchClient}).Collect,
+		},
+		"cch_cost": {
+			id:      config.SegmentCCHCost,
+			enabled: cfg.Segments.CCHCost,
+			collect: (&segment.CCHCostSegment{Client: cchClient}).Collect,
+		},
+		"cch_requests": {
+			id:      config.SegmentCCHRequests,
+			enabled: cfg.Segments.CCHRequests,
+			collect: (&segment.CCHRequestsSegment{Client: cchClient}).Collect,
+		},
+		"cch_limits": {
+			id:      config.SegmentCCHLimits,
+			enabled: cfg.Segments.CCHLimits,
+			collect: (&segment.CCHLimitsSegment{Client: cchClient}).Collect,
 		},
 	}
 

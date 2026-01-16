@@ -22,6 +22,12 @@ const (
 	SegmentSession       SegmentID = "session"
 	SegmentOutputStyle   SegmentID = "output_style"
 	SegmentUpdate        SegmentID = "update"
+	// CCH Segments
+	SegmentCCHModel    SegmentID = "cch_model"
+	SegmentCCHProvider SegmentID = "cch_provider"
+	SegmentCCHCost     SegmentID = "cch_cost"
+	SegmentCCHRequests SegmentID = "cch_requests"
+	SegmentCCHLimits   SegmentID = "cch_limits"
 )
 
 // ThemeMode 主题模式
@@ -64,6 +70,12 @@ const (
 	DefaultIconSession     = "⏱️"
 	DefaultIconOutputStyle = "🎯"
 	DefaultIconUpdate      = "🔄"
+	// CCH Icons
+	DefaultIconCCHModel    = "🔮"
+	DefaultIconCCHProvider = "🏢"
+	DefaultIconCCHCost     = "💵"
+	DefaultIconCCHRequests = "📈"
+	DefaultIconCCHLimits   = "🚦"
 )
 
 // Nerd Font 主题图标 (Unicode 码点)
@@ -77,6 +89,12 @@ const (
 	NerdFontIconSession     = "\U000F19BB" // nf-md-clock_outline
 	NerdFontIconOutputStyle = "\U000F12F5" // nf-md-flag_variant
 	NerdFontIconUpdate      = "\uf021"     // nf-fa-refresh
+	// CCH Icons
+	NerdFontIconCCHModel    = "\U000F02A1" // nf-md-ghost
+	NerdFontIconCCHProvider = "\U000F0F74" // nf-md-server
+	NerdFontIconCCHCost     = "\U000F01E0" // nf-md-cash
+	NerdFontIconCCHRequests = "\U000F0127" // nf-md-chart_line
+	NerdFontIconCCHLimits   = "\U000F0A1B" // nf-md-gauge
 )
 
 // segmentColors 定义各 Segment 的颜色配置 (与图标无关)
@@ -94,6 +112,12 @@ var segmentColors = map[SegmentID]struct {
 	SegmentSession:       {colorGreen, colorGreen, true},
 	SegmentOutputStyle:   {colorCyan, colorCyan, true},
 	SegmentUpdate:        {colorLightYellow, colorLightYellow, false},
+	// CCH Segments
+	SegmentCCHModel:    {colorLightMagenta, colorLightMagenta, true},
+	SegmentCCHProvider: {colorLightBlue, colorLightBlue, true},
+	SegmentCCHCost:     {colorYellow, colorYellow, true},
+	SegmentCCHRequests: {colorLightGreen, colorLightGreen, false},
+	SegmentCCHLimits:   {colorLightCyan, colorLightCyan, false},
 }
 
 // defaultIcons Default 主题图标映射
@@ -107,6 +131,12 @@ var defaultIcons = map[SegmentID]string{
 	SegmentSession:       DefaultIconSession,
 	SegmentOutputStyle:   DefaultIconOutputStyle,
 	SegmentUpdate:        DefaultIconUpdate,
+	// CCH Segments
+	SegmentCCHModel:    DefaultIconCCHModel,
+	SegmentCCHProvider: DefaultIconCCHProvider,
+	SegmentCCHCost:     DefaultIconCCHCost,
+	SegmentCCHRequests: DefaultIconCCHRequests,
+	SegmentCCHLimits:   DefaultIconCCHLimits,
 }
 
 // nerdFontIcons Nerd Font 主题图标映射
@@ -120,6 +150,12 @@ var nerdFontIcons = map[SegmentID]string{
 	SegmentSession:       NerdFontIconSession,
 	SegmentOutputStyle:   NerdFontIconOutputStyle,
 	SegmentUpdate:        NerdFontIconUpdate,
+	// CCH Segments
+	SegmentCCHModel:    NerdFontIconCCHModel,
+	SegmentCCHProvider: NerdFontIconCCHProvider,
+	SegmentCCHCost:     NerdFontIconCCHCost,
+	SegmentCCHRequests: NerdFontIconCCHRequests,
+	SegmentCCHLimits:   NerdFontIconCCHLimits,
 }
 
 // GetSegmentTheme 根据主题模式获取 Segment 主题配置

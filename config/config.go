@@ -18,6 +18,12 @@ var DefaultSegmentOrder = []string{
 	"session",
 	"output_style",
 	"update",
+	// CCH Segments
+	"cch_model",
+	"cch_provider",
+	"cch_cost",
+	"cch_requests",
+	"cch_limits",
 }
 
 // InputData is the JSON structure passed from Claude Code via stdin
@@ -56,6 +62,9 @@ type SimpleConfig struct {
 	Separator    string         `toml:"separator"`
 	SegmentOrder []string       `toml:"segment_order"`
 	Segments     SegmentToggles `toml:"segments"`
+	// CCH Configuration
+	CCHApiKey string `toml:"cch_api_key"`
+	CCHURL    string `toml:"cch_url"`
 }
 
 // SegmentToggles contains enable/disable flags for each segment
@@ -69,6 +78,12 @@ type SegmentToggles struct {
 	Session       bool `toml:"session"`
 	OutputStyle   bool `toml:"output_style"`
 	Update        bool `toml:"update"`
+	// CCH Segments
+	CCHModel    bool `toml:"cch_model"`
+	CCHProvider bool `toml:"cch_provider"`
+	CCHCost     bool `toml:"cch_cost"`
+	CCHRequests bool `toml:"cch_requests"`
+	CCHLimits   bool `toml:"cch_limits"`
 }
 
 // LoadConfig loads configuration from ~/.claude/cchline/config.toml
@@ -91,6 +106,12 @@ func LoadConfig() (*SimpleConfig, error) {
 			Session:       false,
 			OutputStyle:   false,
 			Update:        false,
+			// CCH Segments (disabled by default)
+			CCHModel:    false,
+			CCHProvider: false,
+			CCHCost:     false,
+			CCHRequests: false,
+			CCHLimits:   false,
 		},
 	}
 
@@ -116,6 +137,17 @@ func LoadConfig() (*SimpleConfig, error) {
 	if len(config.SegmentOrder) == 0 {
 		config.SegmentOrder = make([]string, len(DefaultSegmentOrder))
 		copy(config.SegmentOrder, DefaultSegmentOrder)
+	} else {
+		// 检查是否有新增的 segment 未在 SegmentOrder 中
+		existingSegments := make(map[string]bool)
+		for _, s := range config.SegmentOrder {
+			existingSegments[s] = true
+		}
+		for _, s := range DefaultSegmentOrder {
+			if !existingSegments[s] {
+				config.SegmentOrder = append(config.SegmentOrder, s)
+			}
+		}
 	}
 
 	return config, nil

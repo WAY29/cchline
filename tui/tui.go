@@ -137,6 +137,12 @@ func NewModel(cfg *config.SimpleConfig) Model {
 		"session":        "Session",
 		"output_style":   "Output Style",
 		"update":         "Update",
+		// CCH Segments
+		"cch_model":    "CCH Model",
+		"cch_provider": "CCH Provider",
+		"cch_cost":     "CCH Cost",
+		"cch_requests": "CCH Requests",
+		"cch_limits":   "CCH Limits",
 	}
 
 	// segment 名称到启用状态的映射
@@ -150,6 +156,12 @@ func NewModel(cfg *config.SimpleConfig) Model {
 		"session":        cfg.Segments.Session,
 		"output_style":   cfg.Segments.OutputStyle,
 		"update":         cfg.Segments.Update,
+		// CCH Segments
+		"cch_model":    cfg.Segments.CCHModel,
+		"cch_provider": cfg.Segments.CCHProvider,
+		"cch_cost":     cfg.Segments.CCHCost,
+		"cch_requests": cfg.Segments.CCHRequests,
+		"cch_limits":   cfg.Segments.CCHLimits,
 	}
 
 	// 按照配置的顺序添加 segments
@@ -354,6 +366,17 @@ func (m *Model) toggleItem() {
 		m.config.Segments.OutputStyle = item.enabled
 	case "update":
 		m.config.Segments.Update = item.enabled
+	// CCH Segments
+	case "cch_model":
+		m.config.Segments.CCHModel = item.enabled
+	case "cch_provider":
+		m.config.Segments.CCHProvider = item.enabled
+	case "cch_cost":
+		m.config.Segments.CCHCost = item.enabled
+	case "cch_requests":
+		m.config.Segments.CCHRequests = item.enabled
+	case "cch_limits":
+		m.config.Segments.CCHLimits = item.enabled
 	}
 }
 
