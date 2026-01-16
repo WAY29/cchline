@@ -4,6 +4,16 @@
 
 CCHLine 是一个 Claude Code 状态栏增强工具，从 stdin 读取 JSON 数据，生成带 ANSI 颜色的状态栏输出到 stdout。
 
+> 本项目参考了 [CCometixLine](https://github.com/Haleclipse/CCometixLine) 的设计和代码结构，使用 Go 语言进行了重写。
+
+## CCH 配置
+
+CCHLine 支持连接 CCH 服务，配置方式：
+
+1. **TUI 配置**：`cchline -c`，在底部 CCH SETTINGS 区域设置
+2. **命令行**：`cchline -u "URL" -k "API_KEY"`
+3. **配置文件**：`~/.claude/cchline/config.toml` 中设置 `cch_url` 和 `cch_api_key`
+
 ## 核心架构
 
 ### 数据流
@@ -45,7 +55,7 @@ CCHLine 是一个 Claude Code 状态栏增强工具，从 stdin 读取 JSON 数�
 - `SegmentTheme` - 包含 Icon、IconColor、TextColor、BgColor、Bold
 - 图标映射 - `defaultIcons` 和 `nerdFontIcons` 两个 map
 
-## 9 种 Segment
+## 14 种 Segment
 
 | Segment | 文件 | 数据来源 | 输出示例 |
 |---------|------|----------|----------|
@@ -58,6 +68,11 @@ CCHLine 是一个 Claude Code 状态栏增强工具，从 stdin 读取 JSON 数�
 | Session | `segment/session.go` | transcript 文件时间戳 | `1h23m` |
 | OutputStyle | `segment/output_style.go` | `input.OutputStyle.Name` | `default` |
 | Update | `segment/update.go` | 检查新版本 | 空或提示 |
+| CCH Model | `segment/cch_model.go` | CCH API | `claude-3-opus` |
+| CCH Provider | `segment/cch_provider.go` | CCH API | `anthropic` |
+| CCH Cost | `segment/cch_cost.go` | CCH API | `$1.50/$10` |
+| CCH Requests | `segment/cch_requests.go` | CCH API | `123 reqs` |
+| CCH Limits | `segment/cch_limits.go` | CCH API | `5h:$0 W:$50 M:$100` |
 
 ## 配置文件
 
@@ -66,6 +81,8 @@ CCHLine 是一个 Claude Code 状态栏增强工具，从 stdin 读取 JSON 数�
 配置项：
 - `theme` - 主题模式，`default` 或 `nerd_font`
 - `separator` - 分隔符，默认 ` | `
+- `cch_url` - CCH 服务器地址
+- `cch_api_key` - CCH API 密钥
 - `[segments]` - 各 Segment 的 bool 开关
 
 ## TUI 配置界面
@@ -78,6 +95,7 @@ CCHLine 是一个 Claude Code 状态栏增强工具，从 stdin 读取 JSON 数�
 - `Update()` 处理按键事件
 - `View()` 渲染界面
 - `saveConfig()` 保存到 TOML 文件
+- 支持文本输入（CCH URL、API Key），使用 `bubbles/textinput` 组件
 
 ## 扩展指南
 
@@ -101,6 +119,7 @@ CCHLine 是一个 Claude Code 状态栏增强工具，从 stdin 读取 JSON 数�
 - `github.com/fatih/color` - ANSI 颜色
 - `github.com/charmbracelet/bubbletea` - TUI 框架
 - `github.com/charmbracelet/lipgloss` - TUI 样式
+- `github.com/charmbracelet/bubbles/textinput` - TUI 文本输入组件
 
 ## 构建
 

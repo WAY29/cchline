@@ -2,6 +2,8 @@
 
 Claude Code 状态栏增强工具，用 Go 编写。
 
+> 本项目参考了 [CCometixLine](https://github.com/Haleclipse/CCometixLine) 的设计和代码结构，使用 Go 语言进行了重写。
+
 ## 功能
 
 - 显示模型名称、当前目录、Git 状态、上下文使用率等信息
@@ -72,7 +74,58 @@ cost = false
 session = false
 output_style = false
 update = false
+
+# CCH Segments
+cch_model = false
+cch_provider = false
+cch_cost = false
+cch_requests = false
+cch_limits = false
 ```
+
+## CCH 配置
+
+CCHLine 支持连接 CCH (Claude Code Hub) 服务，显示额外的状态信息。
+
+### 配置方式
+
+**方式一：TUI 配置界面（推荐）**
+
+```bash
+cchline -c
+```
+
+在界面底部的 **CCH SETTINGS** 区域：
+- 选择 `CCH URL`，按 `Enter` 输入服务器地址
+- 选择 `API Key`，按 `Enter` 输入 API 密钥（输入时显示为 `****`）
+- 按 `Esc` 保存并退出
+
+**方式二：命令行参数**
+
+```bash
+cchline -u "https://your-cch-server.com" -k "your-api-key"
+```
+
+**方式三：直接编辑配置文件**
+
+在 `~/.claude/cchline/config.toml` 中添加：
+
+```toml
+cch_url = "https://your-cch-server.com"
+cch_api_key = "your-api-key"
+```
+
+### CCH Segments
+
+配置 CCH 后，可启用以下状态段：
+
+| Segment | 说明 |
+|---------|------|
+| CCH Model | CCH 上最后使用的模型 |
+| CCH Provider | CCH 提供商名称 |
+| CCH Cost | 今日成本/每日配额 |
+| CCH Requests | 今日请求数 |
+| CCH Limits | 5小时/周/月限额 |
 
 ## 状态段说明
 
