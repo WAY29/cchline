@@ -99,6 +99,7 @@ type Model struct {
 	quitting bool
 	width    int
 	height   int
+	debugKey string // 调试：显示最后按下的按键
 }
 
 // NewModel 创建新的 TUI 模型
@@ -193,6 +194,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 
 	case tea.KeyMsg:
+		// 调试：记录按键
+		m.debugKey = msg.String()
+
 		switch msg.String() {
 		case "ctrl+c", "esc":
 			// 退出时自动保存
@@ -457,7 +461,10 @@ func (m Model) View() string {
 			keyStyle.Render("Esc") + " Save & Exit",
 	)
 
-	return fmt.Sprintf("\n%s\n%s\n%s\n", title, box, help)
+	// 调试信息
+	debug := fmt.Sprintf("\n  DEBUG: Last key = %q", m.debugKey)
+
+	return fmt.Sprintf("\n%s\n%s\n%s%s\n", title, box, help, debug)
 }
 
 // Run 运行 TUI
