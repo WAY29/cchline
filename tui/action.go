@@ -81,6 +81,116 @@ func (m *Model) moveCursor(delta int) {
 	}
 }
 
+func (m *Model) separatorBounds() (headerIndex, start, end int, ok bool) {
+	headerIndex = -1
+	for i, it := range m.items {
+		if it.isHeader && it.label == "SEPARATOR" {
+			headerIndex = i
+			break
+		}
+	}
+	if headerIndex < 0 {
+		return -1, 0, 0, false
+	}
+
+	start = headerIndex + 1
+	if start >= len(m.items) || !m.items[start].isSeparator {
+		return -1, 0, 0, false
+	}
+
+	end = start
+	for end+1 < len(m.items) && m.items[end+1].isSeparator {
+		end++
+	}
+
+	return headerIndex, start, end, true
+}
+
+func (m *Model) selectedSeparatorIndex(start, end int) int {
+	for i := start; i <= end; i++ {
+		if m.items[i].isSeparator && m.items[i].isSelected {
+			return i
+		}
+	}
+	return start
+}
+
+func (m *Model) moveCursorHorizontal(delta int) {
+	_, start, end, ok := m.separatorBounds()
+	if !ok {
+		return
+	}
+	if m.cursor < start || m.cursor > end {
+		return
+	}
+
+	next := m.cursor + delta
+	if next < start {
+		next = end
+	} else if next > end {
+		next = start
+	}
+	m.cursor = next
+}
+
+func (m *Model) moveCursorVertical(delta int) {
+	if delta == 0 {
+		return
+	}
+
+	headerIndex, start, end, ok := m.separatorBounds()
+	if ok && m.cursor >= start && m.cursor <= end {
+		if delta < 0 {
+			// Jump above the SEPARATOR block.
+			newCursor := headerIndex - 1
+			for newCursor >= 0 && m.items[newCursor].isHeader {
+				newCursor--
+			}
+			if newCursor < 0 {
+				// Wrap to last selectable item.
+				newCursor = len(m.items) - 1
+				for newCursor >= 0 && m.items[newCursor].isHeader {
+					newCursor--
+				}
+			}
+			if newCursor >= 0 && newCursor < len(m.items) {
+				m.cursor = newCursor
+			}
+			return
+		}
+
+		// delta > 0: Jump below the SEPARATOR block.
+		newCursor := end + 1
+		for newCursor < len(m.items) && m.items[newCursor].isHeader {
+			newCursor++
+		}
+		if newCursor >= len(m.items) {
+			// Wrap to first selectable item.
+			newCursor = 0
+			for newCursor < len(m.items) && m.items[newCursor].isHeader {
+				newCursor++
+			}
+		}
+		if newCursor >= 0 && newCursor < len(m.items) {
+			m.cursor = newCursor
+		}
+		return
+	}
+
+	previous := m.cursor
+	m.moveCursor(delta)
+
+	// When entering the SEPARATOR block vertically, land on the selected preset.
+	if ok && m.cursor >= start && m.cursor <= end {
+		if previous < start && delta > 0 {
+			m.cursor = m.selectedSeparatorIndex(start, end)
+		}
+		if previous > end && delta < 0 {
+			m.cursor = m.selectedSeparatorIndex(start, end)
+		}
+	}
+}
+
 // moveSegment 移动 segment 顺序
 func (m *Model) moveSegment(delta int) {
 	item := m.items[m.cursor]

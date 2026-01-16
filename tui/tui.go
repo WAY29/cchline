@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // 样式定义
@@ -19,13 +20,11 @@ var (
 			Bold(true).
 			Foreground(lipgloss.Color("86")).
 			Background(lipgloss.Color("236")).
-			Padding(0, 2).
-			MarginBottom(1)
+			Padding(0, 2)
 
 	// 分组标题
 	sectionStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("243")).
-			MarginTop(1)
+			Foreground(lipgloss.Color("243"))
 
 	// 选中项样式
 	selectedStyle = lipgloss.NewStyle().
@@ -52,8 +51,7 @@ var (
 	helpBarStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("241")).
 			Background(lipgloss.Color("236")).
-			Padding(0, 2).
-			MarginTop(1)
+			Padding(0, 2)
 
 	// 快捷键样式
 	keyStyle = lipgloss.NewStyle().
@@ -70,13 +68,12 @@ var (
 	previewStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("86")).
-			Padding(0, 2).
-			MarginBottom(1)
+			Padding(0, 2)
 
 	// 预览标签样式
 	previewLabelStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("243")).
-			Italic(true)
+				Foreground(lipgloss.Color("243")).
+				Italic(true)
 )
 
 // SeparatorPreset 分隔符预设
@@ -240,9 +237,405 @@ func NewModel(cfg *config.SimpleConfig) Model {
 		config:     cfg,
 		cursor:     cursor,
 		items:      items,
-		width:      50,
-		height:     20,
+		width:      0,
+		height:     0,
 		textInputs: textInputs,
+	}
+}
+
+func clampInt(v, min, max int) int {
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
+}
+
+func safeWidth(w int) int {
+	if w <= 0 {
+		return 80
+	}
+	return w
+}
+
+func safeHeight(h int) int {
+	if h <= 0 {
+		return 24
+	}
+	return h
+}
+
+func limitANSILines(s string, maxLines, width int) string {
+	if maxLines <= 0 || width <= 0 || s == "" {
+		return ""
+	}
+
+	lines := strings.Split(s, "\n")
+	overflow := len(lines) > maxLines
+	if overflow {
+		lines = lines[:maxLines]
+	}
+
+	for i := range lines {
+		lines[i] = ansi.Truncate(lines[i], width, "")
+	}
+
+	if overflow {
+		last := maxLines - 1
+		if width >= 3 {
+			lines[last] = ansi.Truncate(lines[last], width-3, "") + "..."
+		} else {
+			lines[last] = strings.Repeat(".", width)
+		}
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+type layout struct {
+	titleLines      []string
+	previewBoxLines []string
+
+	menuBoxLines []string
+
+	installStatus string
+	helpLines     []string
+	statusLine    string
+	debugLine     string
+}
+
+func splitLines(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, "\n")
+}
+
+func (m Model) buildHelpText() string {
+	if m.confirmAction != "" {
+		var actionText string
+		if m.confirmAction == "install" {
+			actionText = "安装 cchline 到 Claude Code?"
+		} else {
+			actionText = "从 Claude Code 卸载 cchline?"
+		}
+		return valueStyle.Render(actionText) + "  " +
+			keyStyle.Render("y") + " 确认  " +
+			keyStyle.Render("n") + " 取消"
+	}
+
+	if m.editing {
+		return keyStyle.Render("Enter") + " Save  " +
+			keyStyle.Render("Ctrl+U") + " Clear  " +
+			keyStyle.Render("Esc") + " Cancel"
+	}
+
+	return keyStyle.Render("↑↓") + " Navigate  " +
+		keyStyle.Render("←→") + " Separator  " +
+		keyStyle.Render("Space") + " Toggle  " +
+		keyStyle.Render("Enter") + " Edit Text\n" +
+		keyStyle.Render(ReorderKeyHint) + " Move  " +
+		keyStyle.Render("a") + " Add Break  " +
+		keyStyle.Render("d") + " Del Break\n" +
+		keyStyle.Render("i") + " Install  " +
+		keyStyle.Render("u") + " Uninstall  " +
+		keyStyle.Render("Esc") + " Exit"
+}
+
+func (m Model) buildMenuLines(innerWidth int) (lines []string, itemLineIndex []int) {
+	itemLineIndex = make([]int, len(m.items))
+
+	appendLine := func(s string) {
+		lines = append(lines, ansi.Truncate(s, innerWidth, ""))
+	}
+
+	for i := 0; i < len(m.items); i++ {
+		item := m.items[i]
+		if item.isHeader {
+			if len(lines) > 0 {
+				lines = append(lines, "")
+			}
+			itemLineIndex[i] = len(lines)
+			appendLine(sectionStyle.Render("  " + item.label))
+			continue
+		}
+
+		// Collapse separator presets into a single line (plus a preview line).
+		if item.isSeparator {
+			start := i
+			end := i
+			for end+1 < len(m.items) && m.items[end+1].isSeparator {
+				end++
+			}
+
+			lineIndex := len(lines)
+			for j := start; j <= end; j++ {
+				itemLineIndex[j] = lineIndex
+			}
+
+			tokens := make([]string, 0, end-start+1)
+			for j := start; j <= end; j++ {
+				it := m.items[j]
+				cursorMark := " "
+				if m.cursor == j {
+					cursorMark = selectedStyle.Render("▸")
+				}
+				dot := disabledStyle.Render("○")
+				if it.isSelected {
+					dot = enabledStyle.Render("●")
+				}
+				label := normalStyle.Render(it.label)
+				if m.cursor == j {
+					label = selectedStyle.Render(it.label)
+				}
+				tokens = append(tokens, fmt.Sprintf("%s%s %s", cursorMark, dot, label))
+			}
+
+			appendLine("  " + strings.Join(tokens, "  "))
+
+			preview := "A" + m.config.Separator + "B"
+			appendLine("  " + valueStyle.Render(fmt.Sprintf("%q", m.config.Separator)) + "  " + normalStyle.Render(preview))
+
+			i = end
+			continue
+		}
+
+		itemLineIndex[i] = len(lines)
+
+		cursor := "   "
+		if m.cursor == i {
+			cursor = " ▸ "
+		}
+
+		var line string
+		if item.isTextInput {
+			input := m.textInputs[item.textKey]
+			var displayValue string
+
+			if m.editing && m.cursor == i {
+				displayValue = input.View()
+			} else {
+				value := input.Value()
+				if item.textKey == "cch_api_key" && value != "" {
+					displayValue = valueStyle.Render("****")
+				} else if value == "" {
+					displayValue = disabledStyle.Render("(empty)")
+				} else {
+					displayValue = valueStyle.Render(value)
+				}
+			}
+
+			if m.cursor == i {
+				line = fmt.Sprintf("%s%s  %s", cursor, selectedStyle.Render(item.label), displayValue)
+			} else {
+				line = fmt.Sprintf("%s%s  %s", cursor, normalStyle.Render(item.label), displayValue)
+			}
+		} else if item.key == "theme" {
+			var themeValue string
+			if item.enabled {
+				themeValue = valueStyle.Render("nerd_font")
+			} else {
+				themeValue = valueStyle.Render("default")
+			}
+
+			if m.cursor == i {
+				line = fmt.Sprintf("%s%s  %s", cursor, selectedStyle.Render(item.label), themeValue)
+			} else {
+				line = fmt.Sprintf("%s%s  %s", cursor, normalStyle.Render(item.label), themeValue)
+			}
+		} else if item.isLineBreak {
+			if m.cursor == i {
+				line = fmt.Sprintf("%s%s", cursor, selectedStyle.Render("↵ Line Break"))
+			} else {
+				line = fmt.Sprintf("%s%s", cursor, disabledStyle.Render("↵ Line Break"))
+			}
+		} else {
+			var status string
+			if item.enabled {
+				status = enabledStyle.Render("●")
+			} else {
+				status = disabledStyle.Render("○")
+			}
+
+			if m.cursor == i {
+				line = fmt.Sprintf("%s%s %s", cursor, status, selectedStyle.Render(item.label))
+			} else {
+				line = fmt.Sprintf("%s%s %s", cursor, status, normalStyle.Render(item.label))
+			}
+		}
+
+		appendLine(line)
+	}
+
+	return lines, itemLineIndex
+}
+
+func (m Model) buildLayout(width, height int) layout {
+	termWidth := safeWidth(width)
+	height = safeHeight(height)
+
+	// Avoid printing into the last terminal column to prevent autowrap.
+	totalWidth := termWidth
+	if totalWidth > 1 {
+		totalWidth--
+	}
+
+	// lipgloss Style.Width is applied *before* borders are added, so for bordered
+	// blocks we must subtract the border sizes to achieve an overall total width.
+	totalToContentWidth := func(s lipgloss.Style, total int) int {
+		w := total - s.GetHorizontalBorderSize() - s.GetHorizontalMargins()
+		if w < 0 {
+			return 0
+		}
+		return w
+	}
+
+	contentToInnerWidth := func(s lipgloss.Style, content int) int {
+		w := content - s.GetHorizontalPadding()
+		if w < 1 {
+			return 1
+		}
+		return w
+	}
+
+	menuContentWidth := totalToContentWidth(boxStyle, totalWidth)
+	menuBoxStyle := boxStyle.Width(menuContentWidth)
+	menuFrameY := menuBoxStyle.GetVerticalFrameSize()
+
+	previewMaxLines := 3
+	helpMaxLines := 3
+	showStatus := m.statusMessage != ""
+	showDebug := m.debugKey != ""
+
+	var (
+		title         string
+		previewBox    string
+		installStatus string
+		helpBox       string
+		statusLine    string
+		debugLine     string
+	)
+
+	for {
+		title = titleStyle.Width(totalWidth).Render(" CCHLine Configuration ")
+
+		previewContentWidth := totalToContentWidth(previewStyle, totalWidth)
+		previewBoxStyle := previewStyle.Width(previewContentWidth)
+		previewInnerWidth := contentToInnerWidth(previewStyle, previewContentWidth)
+		previewContent := limitANSILines(m.generatePreview(), previewMaxLines, previewInnerWidth)
+		previewBox = previewBoxStyle.Render(previewContent)
+
+		if isInstalled() {
+			installStatus = "  " + enabledStyle.Render("● 已安装")
+		} else {
+			installStatus = "  " + disabledStyle.Render("○ 未安装")
+		}
+		installStatus = ansi.Truncate(installStatus, totalWidth, "")
+
+		helpBoxStyle := helpBarStyle.Width(totalWidth)
+		helpInnerWidth := totalWidth - helpBarStyle.GetHorizontalPadding()
+		if helpInnerWidth < 1 {
+			helpInnerWidth = 1
+		}
+		helpText := limitANSILines(m.buildHelpText(), helpMaxLines, helpInnerWidth)
+		helpBox = helpBoxStyle.Render(helpText)
+
+		statusLine = ""
+		if showStatus {
+			statusLine = ansi.Truncate("  "+m.statusMessage, totalWidth, "")
+		}
+
+		debugLine = ""
+		if showDebug {
+			debugLine = ansi.Truncate(fmt.Sprintf("  DEBUG: Last key = %q", m.debugKey), totalWidth, "")
+		}
+
+		topHeight := lipgloss.Height(title) + 1 + lipgloss.Height(previewBox)
+		bottomHeight := 1 + lipgloss.Height(helpBox)
+		if showStatus {
+			bottomHeight += 1
+		}
+		if showDebug {
+			bottomHeight += 1
+		}
+
+		remaining := height - topHeight - bottomHeight
+		if remaining >= menuFrameY+1 || (previewMaxLines <= 1 && helpMaxLines <= 1 && !showStatus && !showDebug) {
+			break
+		}
+
+		if showDebug {
+			showDebug = false
+			continue
+		}
+		if showStatus {
+			showStatus = false
+			continue
+		}
+		if helpMaxLines > 1 {
+			helpMaxLines--
+			continue
+		}
+		if previewMaxLines > 1 {
+			previewMaxLines--
+			continue
+		}
+		break
+	}
+
+	topHeight := lipgloss.Height(title) + 1 + lipgloss.Height(previewBox)
+	bottomHeight := 1 + lipgloss.Height(helpBox)
+	if showStatus {
+		bottomHeight += 1
+	}
+	if showDebug {
+		bottomHeight += 1
+	}
+
+	available := height - topHeight - bottomHeight
+	if available < 0 {
+		available = 0
+	}
+
+	menuInnerHeight := available - menuFrameY
+	if menuInnerHeight < 1 {
+		menuInnerHeight = 1
+	}
+
+	menuInnerWidth := contentToInnerWidth(boxStyle, menuContentWidth)
+	menuLines, itemLineIndex := m.buildMenuLines(menuInnerWidth)
+
+	cursorLine := 0
+	if m.cursor >= 0 && m.cursor < len(itemLineIndex) {
+		cursorLine = itemLineIndex[m.cursor]
+	}
+
+	start := 0
+	if len(menuLines) > menuInnerHeight && menuInnerHeight > 0 {
+		if cursorLine >= menuInnerHeight {
+			start = cursorLine - menuInnerHeight + 1
+		}
+		start = clampInt(start, 0, len(menuLines)-menuInnerHeight)
+	}
+
+	end := len(menuLines)
+	if len(menuLines) > menuInnerHeight {
+		end = start + menuInnerHeight
+	}
+
+	visibleMenuLines := menuLines[start:end]
+	menuBox := menuBoxStyle.Render(strings.Join(visibleMenuLines, "\n"))
+
+	return layout{
+		titleLines:      splitLines(title),
+		previewBoxLines: splitLines(previewBox),
+		menuBoxLines:    splitLines(menuBox),
+		installStatus:   installStatus,
+		helpLines:       splitLines(helpBox),
+		statusLine:      statusLine,
+		debugLine:       debugLine,
 	}
 }
 
@@ -431,10 +824,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case "up", "k":
-			m.moveCursor(-1)
+			m.moveCursorVertical(-1)
 
 		case "down", "j":
-			m.moveCursor(1)
+			m.moveCursorVertical(1)
+
+		case "left", "h":
+			m.moveCursorHorizontal(-1)
+
+		case "right", "l":
+			m.moveCursorHorizontal(1)
 
 		case MoveUpKey:
 			m.moveSegment(-1)
@@ -482,169 +881,37 @@ func (m Model) View() string {
 		return ""
 	}
 
-	// 标题
-	title := titleStyle.Render(" CCHLine Configuration ")
+	lay := m.buildLayout(m.width, m.height)
 
-	// 预览区域
-	previewLabel := previewLabelStyle.Render("  Preview:")
-	previewContent := m.generatePreview()
-	preview := previewStyle.Render(previewContent)
-
-	// 内容
-	var content strings.Builder
-	for i, item := range m.items {
-		if item.isHeader {
-			// 分组标题
-			content.WriteString(sectionStyle.Render("  "+item.label) + "\n")
-			continue
-		}
-
-		// 光标指示器
-		cursor := "   "
-		if m.cursor == i {
-			cursor = " ▸ "
-		}
-
-		// 渲染行
-		var line string
-		if item.isTextInput {
-			// 文本输入项显示
-			input := m.textInputs[item.textKey]
-			var displayValue string
-
-			if m.editing && m.cursor == i {
-				// 编辑模式：显示 textinput 的 View()
-				displayValue = input.View()
-			} else {
-				// 非编辑模式：显示当前值
-				value := input.Value()
-				if item.textKey == "cch_api_key" && value != "" {
-					// API Key 显示为 ****
-					displayValue = valueStyle.Render("****")
-				} else if value == "" {
-					displayValue = disabledStyle.Render("(empty)")
-				} else {
-					displayValue = valueStyle.Render(value)
-				}
-			}
-
-			if m.cursor == i {
-				line = fmt.Sprintf("%s%s  %s", cursor, selectedStyle.Render(item.label), displayValue)
-			} else {
-				line = fmt.Sprintf("%s%s  %s", cursor, normalStyle.Render(item.label), displayValue)
-			}
-		} else if item.key == "theme" {
-			// Theme 特殊显示
-			var themeValue string
-			if item.enabled {
-				themeValue = valueStyle.Render("nerd_font")
-			} else {
-				themeValue = valueStyle.Render("default")
-			}
-
-			if m.cursor == i {
-				line = fmt.Sprintf("%s%s  %s", cursor, selectedStyle.Render(item.label), themeValue)
-			} else {
-				line = fmt.Sprintf("%s%s  %s", cursor, normalStyle.Render(item.label), themeValue)
-			}
-		} else if item.isSeparator {
-			// 分隔符选项显示
-			var status string
-			if item.isSelected {
-				status = enabledStyle.Render("●")
-			} else {
-				status = disabledStyle.Render("○")
-			}
-			// 显示分隔符预览
-			separatorPreview := valueStyle.Render(fmt.Sprintf("%q", item.key))
-
-			if m.cursor == i {
-				line = fmt.Sprintf("%s%s %s  %s", cursor, status, selectedStyle.Render(item.label), separatorPreview)
-			} else {
-				line = fmt.Sprintf("%s%s %s  %s", cursor, status, normalStyle.Render(item.label), separatorPreview)
-			}
-		} else if item.isLineBreak {
-			// 换行分隔符显示
-			if m.cursor == i {
-				line = fmt.Sprintf("%s%s", cursor, selectedStyle.Render("↵ Line Break"))
-			} else {
-				line = fmt.Sprintf("%s%s", cursor, disabledStyle.Render("↵ Line Break"))
-			}
-		} else {
-			// Segment 开关显示
-			var status string
-			if item.enabled {
-				status = enabledStyle.Render("●")
-			} else {
-				status = disabledStyle.Render("○")
-			}
-
-			if m.cursor == i {
-				line = fmt.Sprintf("%s%s %s", cursor, status, selectedStyle.Render(item.label))
-			} else {
-				line = fmt.Sprintf("%s%s %s", cursor, status, normalStyle.Render(item.label))
-			}
-		}
-
-		content.WriteString(line + "\n")
+	var lines []string
+	lines = append(lines, lay.titleLines...)
+	lines = append(lines, lay.previewBoxLines...)
+	lines = append(lines, lay.menuBoxLines...)
+	lines = append(lines, lay.installStatus)
+	lines = append(lines, lay.helpLines...)
+	if lay.statusLine != "" {
+		lines = append(lines, lay.statusLine)
+	}
+	if lay.debugLine != "" {
+		lines = append(lines, lay.debugLine)
 	}
 
-	// 包装内容
-	box := boxStyle.Render(content.String())
-
-	// 安装状态
-	var installStatus string
-	if isInstalled() {
-		installStatus = "  " + enabledStyle.Render("● 已安装")
-	} else {
-		installStatus = "  " + disabledStyle.Render("○ 未安装")
+	h := safeHeight(m.height)
+	if len(lines) < h {
+		lines = append(lines, make([]string, h-len(lines))...)
+	} else if len(lines) > h {
+		lines = lines[:h]
 	}
 
-	// 帮助栏
-	var help string
-	if m.confirmAction != "" {
-		// 确认模式
-		var actionText string
-		if m.confirmAction == "install" {
-			actionText = "安装 cchline 到 Claude Code?"
-		} else {
-			actionText = "从 Claude Code 卸载 cchline?"
-		}
-		help = helpBarStyle.Render(
-			valueStyle.Render(actionText) + "  " +
-				keyStyle.Render("y") + " 确认  " +
-				keyStyle.Render("n") + " 取消",
-		)
-	} else if m.editing {
-		help = helpBarStyle.Render(
-			keyStyle.Render("Enter") + " Save  " +
-				keyStyle.Render("Ctrl+U") + " Clear  " +
-				keyStyle.Render("Esc") + " Cancel",
-		)
-	} else {
-		help = helpBarStyle.Render(
-			keyStyle.Render("↑↓") + " Navigate  " +
-				keyStyle.Render("Space") + " Toggle  " +
-				keyStyle.Render("Enter") + " Edit Text\n" +
-				keyStyle.Render(ReorderKeyHint) + " Move  " +
-				keyStyle.Render("a") + " Add Break  " +
-				keyStyle.Render("d") + " Del Break\n" +
-				keyStyle.Render("i") + " Install  " +
-				keyStyle.Render("u") + " Uninstall  " +
-				keyStyle.Render("Esc") + " Exit",
-		)
+	w := safeWidth(m.width)
+	if w > 1 {
+		w--
+	}
+	for i := range lines {
+		lines[i] = ansi.Truncate(lines[i], w, "")
 	}
 
-	// 状态消息
-	var status string
-	if m.statusMessage != "" {
-		status = "\n  " + m.statusMessage
-	}
-
-	// 调试信息
-	debug := fmt.Sprintf("\n  DEBUG: Last key = %q", m.debugKey)
-
-	return fmt.Sprintf("\n%s\n%s\n%s\n%s\n%s\n%s%s%s\n", title, previewLabel, preview, box, installStatus, help, status, debug)
+	return strings.Join(lines, "\n")
 }
 
 // Run 运行 TUI

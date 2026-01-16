@@ -87,7 +87,7 @@ const (
 	NerdFontIconGit         = "\U000F02A2" // nf-md-git
 	NerdFontIconContext     = "\uf49b"     // nf-md-layers_triple
 	NerdFontIconUsage       = "\U000F0A9E" // nf-md-chart_bar
-	NerdFontIconCost        = "\ueec1"     // nf-md-currency_usd
+	NerdFontIconCost        = "\uf155"     // nf-md-currency_usd
 	NerdFontIconSession     = "\U000F19BB" // nf-md-clock_outline
 	NerdFontIconOutputStyle = "\U000F12F5" // nf-md-flag_variant
 	NerdFontIconUpdate      = "\uf021"     // nf-fa-refresh
