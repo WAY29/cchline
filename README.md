@@ -7,7 +7,7 @@ Claude Code 状态栏增强工具，用 Go 编写。
 ## 功能
 
 - 显示模型名称、当前目录、Git 状态、上下文使用率等信息
-- 支持 9 种状态段（Segment），可自由启用/禁用
+- 支持 14 种状态段（Segment），可自由启用/禁用
 - 支持两套主题：`default`（Emoji）和 `nerd_font`（Nerd Font 图标）
 - 交互式配置界面
 
@@ -35,14 +35,7 @@ sudo mv cchline /usr/local/bin/
 }
 ```
 
-## 使用
-
-### 状态栏模式
-
-```bash
-# 由 Claude Code 自动调用
-claude-code | cchline
-```
+## 配置CCHLine
 
 ### 交互式配置
 
@@ -52,17 +45,21 @@ cchline -c
 
 操作说明：
 - `↑` `↓` / `j` `k` - 上下移动
-- `Space` / `Enter` - 切换选项
-- `s` - 保存配置
-- `Esc` - 退出
+- `Space` - 切换启用/禁用
+- `Enter` - 编辑文本输入项
+- `Ctrl+U` - 清空当前文本输入
+- `Esc` - 保存并退出
 
-## 配置文件
+### 手动修改配置文件
 
 路径：`~/.claude/cchline/config.toml`
 
 ```toml
 theme = "nerd_font"  # "default" 或 "nerd_font"
 separator = " | "
+segment_order = ["model", "directory", "git", "context_window", "usage", "cost", "session", "output_style", "update", "cch_model", "cch_provider", "cch_cost", "cch_requests", "cch_limits"]
+cch_api_key = "your_api_key_here"
+cch_url = "https://your-cch-server.com"
 
 [segments]
 model = true
@@ -74,8 +71,6 @@ cost = false
 session = false
 output_style = false
 update = false
-
-# CCH Segments
 cch_model = false
 cch_provider = false
 cch_cost = false
@@ -106,7 +101,7 @@ cchline -c
 cchline -u "https://your-cch-server.com" -k "your-api-key"
 ```
 
-**方式三：直接编辑配置文件**
+**方式三：手动修改配置文件**
 
 在 `~/.claude/cchline/config.toml` 中添加：
 
@@ -140,20 +135,6 @@ cch_api_key = "your-api-key"
 | Session | 会话时长 | ❌ |
 | Output Style | 输出风格 | ❌ |
 | Update | 更新提示 | ❌ |
-
-## 主题
-
-### default（Emoji）
-
-```
-🤖 Sonnet 3.5 | 📁 myapp | 🌿 main | ⚡️ 15.6% · 31.1k tokens
-```
-
-### nerd_font（Nerd Font）
-
-```
- Sonnet 3.5 | 󰉋 myapp | 󰊢 main |  15.6% · 31.1k tokens
-```
 
 > 使用 `nerd_font` 主题需要终端安装 [Nerd Font](https://www.nerdfonts.com/) 字体。
 
