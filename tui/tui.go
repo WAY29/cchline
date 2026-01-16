@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 	"github.com/WAY29/cchline/config"
@@ -249,6 +250,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// 取消编辑，不保存
 				m.editing = false
 				return m, nil
+			case "ctrl+u":
+				// 清空当前文本输入
+				item := m.items[m.cursor]
+				if item.isTextInput {
+					input := m.textInputs[item.textKey]
+					input.SetValue("")
+					m.textInputs[item.textKey] = input
+				}
+				return m, nil
 			default:
 				// 将按键传递给 textinput
 				item := m.items[m.cursor]
@@ -322,14 +332,46 @@ func (m *Model) saveTextInputValue() {
 func (m *Model) moveCursor(delta int) {
 	newCursor := m.cursor + delta
 
-	// 边界检查
+	// 边界检查，处理初始越界
 	if newCursor < 0 || newCursor >= len(m.items) {
+		// 直接越界，触发循环导航
+		if delta < 0 {
+			// 向上越界，跳到最后一个非 header 项
+			newCursor = len(m.items) - 1
+			for newCursor >= 0 && m.items[newCursor].isHeader {
+				newCursor--
+			}
+		} else {
+			// 向下越界，跳到第一个非 header 项
+			newCursor = 0
+			for newCursor < len(m.items) && m.items[newCursor].isHeader {
+				newCursor++
+			}
+		}
+		if newCursor >= 0 && newCursor < len(m.items) {
+			m.cursor = newCursor
+		}
 		return
 	}
 
 	// 跳过 header
 	for newCursor >= 0 && newCursor < len(m.items) && m.items[newCursor].isHeader {
 		newCursor += delta
+	}
+
+	// 跳过 header 后越界，触发循环导航
+	if newCursor < 0 {
+		// 向上越界，跳到最后一个非 header 项
+		newCursor = len(m.items) - 1
+		for newCursor >= 0 && m.items[newCursor].isHeader {
+			newCursor--
+		}
+	} else if newCursor >= len(m.items) {
+		// 向下越界，跳到第一个非 header 项
+		newCursor = 0
+		for newCursor < len(m.items) && m.items[newCursor].isHeader {
+			newCursor++
+		}
 	}
 
 	if newCursor >= 0 && newCursor < len(m.items) {
@@ -502,11 +544,11 @@ func (m Model) View() string {
 	title := titleStyle.Render(" CCHLine Configuration ")
 
 	// 内容
-	var content string
+	var content strings.Builder
 	for i, item := range m.items {
 		if item.isHeader {
 			// 分组标题
-			content += sectionStyle.Render("  "+item.label) + "\n"
+			content.WriteString(sectionStyle.Render("  "+item.label) + "\n")
 			continue
 		}
 
@@ -590,24 +632,26 @@ func (m Model) View() string {
 			}
 		}
 
-		content += line + "\n"
+		content.WriteString(line + "\n")
 	}
 
 	// 包装内容
-	box := boxStyle.Render(content)
+	box := boxStyle.Render(content.String())
 
 	// 帮助栏
 	var help string
 	if m.editing {
 		help = helpBarStyle.Render(
 			keyStyle.Render("Enter") + " Save  " +
+				keyStyle.Render("Ctrl+U") + " Clear  " +
 				keyStyle.Render("Esc") + " Cancel",
 		)
 	} else {
 		help = helpBarStyle.Render(
 			keyStyle.Render("↑↓") + " Navigate  " +
 				keyStyle.Render("Space") + " Toggle  " +
-				keyStyle.Render(ReorderKeyHint) + " Reorder  " +
+				keyStyle.Render("Enter") + " Edit Text\n" +
+				keyStyle.Render(ReorderKeyHint) + " Move Segments  " +
 				keyStyle.Render("Esc") + " Save & Exit",
 		)
 	}
