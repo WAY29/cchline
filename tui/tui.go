@@ -7,6 +7,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/WAY29/cchline/config"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -89,17 +90,21 @@ type menuItem struct {
 	isHeader    bool
 	isSeparator bool // 是否为分隔符选项
 	isSelected  bool // 分隔符是否被选中
+	isTextInput bool // 是否为文本输入项
+	textKey     string // 文本输入的配置键名 ("cch_url" 或 "cch_api_key")
 }
 
 // Model TUI 模型
 type Model struct {
-	config   *config.SimpleConfig
-	cursor   int
-	items    []menuItem
-	quitting bool
-	width    int
-	height   int
-	debugKey string // 调试：显示最后按下的按键
+	config       *config.SimpleConfig
+	cursor       int
+	items        []menuItem
+	quitting     bool
+	width        int
+	height       int
+	debugKey     string // 调试：显示最后按下的按键
+	editing      bool // 是否处于编辑模式
+	textInputs   map[string]textinput.Model // 文本输入组件
 }
 
 // NewModel 创建新的 TUI 模型
@@ -175,6 +180,28 @@ func NewModel(cfg *config.SimpleConfig) Model {
 		}
 	}
 
+	// CCH SETTINGS 设置
+	items = append(items, menuItem{label: "CCH SETTINGS", key: "", isHeader: true})
+	items = append(items, menuItem{label: "CCH URL", key: "cch_url", isTextInput: true, textKey: "cch_url"})
+	items = append(items, menuItem{label: "API Key", key: "cch_api_key", isTextInput: true, textKey: "cch_api_key"})
+
+	// 初始化文本输入组件
+	textInputs := make(map[string]textinput.Model)
+
+	// CCH URL 输入
+	cchURLInput := textinput.New()
+	cchURLInput.Placeholder = "https://example.com"
+	cchURLInput.SetValue(cfg.CCHURL)
+	textInputs["cch_url"] = cchURLInput
+
+	// API Key 输入（密码模式）
+	apiKeyInput := textinput.New()
+	apiKeyInput.Placeholder = "Enter API Key"
+	apiKeyInput.EchoMode = textinput.EchoPassword
+	apiKeyInput.EchoCharacter = '*'
+	apiKeyInput.SetValue(cfg.CCHApiKey)
+	textInputs["cch_api_key"] = apiKeyInput
+
 	// 找到第一个非 header 项
 	cursor := 0
 	for i, item := range items {
@@ -185,11 +212,12 @@ func NewModel(cfg *config.SimpleConfig) Model {
 	}
 
 	return Model{
-		config: cfg,
-		cursor: cursor,
-		items:  items,
-		width:  50,
-		height: 20,
+		config:     cfg,
+		cursor:     cursor,
+		items:      items,
+		width:      50,
+		height:     20,
+		textInputs: textInputs,
 	}
 }
 
@@ -209,6 +237,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// 调试：记录按键
 		m.debugKey = msg.String()
 
+		// 如果处于编辑模式，处理文本输入
+		if m.editing {
+			switch msg.String() {
+			case "enter":
+				// 保存当前编辑的值
+				m.saveTextInputValue()
+				m.editing = false
+				return m, nil
+			case "esc":
+				// 取消编辑，不保存
+				m.editing = false
+				return m, nil
+			default:
+				// 将按键传递给 textinput
+				item := m.items[m.cursor]
+				if item.isTextInput {
+					input := m.textInputs[item.textKey]
+					var cmd tea.Cmd
+					input, cmd = input.Update(msg)
+					m.textInputs[item.textKey] = input
+					return m, cmd
+				}
+			}
+		}
+
+		// 非编辑模式的按键处理
 		switch msg.String() {
 		case "ctrl+c", "esc":
 			// 退出时自动保存
@@ -229,11 +283,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.moveSegment(1)
 
 		case "enter", " ":
-			m.toggleItem()
+			// 检查是否是文本输入项
+			item := m.items[m.cursor]
+			if item.isTextInput {
+				m.editing = true
+				// 聚焦到对应的 textinput
+				input := m.textInputs[item.textKey]
+				input.Focus()
+				m.textInputs[item.textKey] = input
+			} else {
+				m.toggleItem()
+			}
 		}
 	}
 
 	return m, nil
+}
+
+// saveTextInputValue 保存文本输入的值到配置
+func (m *Model) saveTextInputValue() {
+	item := m.items[m.cursor]
+	if !item.isTextInput {
+		return
+	}
+
+	input := m.textInputs[item.textKey]
+	value := input.Value()
+
+	switch item.textKey {
+	case "cch_url":
+		m.config.CCHURL = value
+	case "cch_api_key":
+		m.config.CCHApiKey = value
+	}
 }
 
 // moveCursor 移动光标
@@ -258,29 +340,35 @@ func (m *Model) moveCursor(delta int) {
 // moveSegment 移动 segment 顺序
 func (m *Model) moveSegment(delta int) {
 	item := m.items[m.cursor]
-	// 只能移动 segment 项（非 header、非 separator、非 theme）
-	if item.isHeader || item.isSeparator || item.key == "theme" {
+	// 只能移动 segment 项（非 header、非 separator、非 theme、非 textInput）
+	if item.isHeader || item.isSeparator || item.key == "theme" || item.isTextInput {
 		return
 	}
 
-	// 找到 SEGMENTS header 的位置
+	// 找到 SEGMENTS header 和 CCH SETTINGS header 的位置
 	segmentsStart := -1
+	segmentsEnd := -1
 	for i, it := range m.items {
 		if it.isHeader && it.label == "SEGMENTS" {
 			segmentsStart = i + 1
+		} else if it.isHeader && it.label == "CCH SETTINGS" {
+			segmentsEnd = i
 			break
 		}
 	}
 	if segmentsStart < 0 {
 		return
 	}
+	if segmentsEnd < 0 {
+		segmentsEnd = len(m.items)
+	}
 
 	// 计算当前 segment 在 segment 列表中的相对位置
 	segmentIndex := m.cursor - segmentsStart
 	newIndex := segmentIndex + delta
 
-	// 边界检查
-	segmentCount := len(m.items) - segmentsStart
+	// 边界检查：只能在 SEGMENTS 区域内移动
+	segmentCount := segmentsEnd - segmentsStart
 	if newIndex < 0 || newIndex >= segmentCount {
 		return
 	}
@@ -296,21 +384,27 @@ func (m *Model) moveSegment(delta int) {
 
 // updateSegmentOrder 更新配置中的 segment 顺序
 func (m *Model) updateSegmentOrder() {
-	// 找到 SEGMENTS header 的位置
+	// 找到 SEGMENTS header 和 CCH SETTINGS header 的位置
 	segmentsStart := -1
+	segmentsEnd := -1
 	for i, it := range m.items {
 		if it.isHeader && it.label == "SEGMENTS" {
 			segmentsStart = i + 1
+		} else if it.isHeader && it.label == "CCH SETTINGS" {
+			segmentsEnd = i
 			break
 		}
 	}
 	if segmentsStart < 0 {
 		return
 	}
+	if segmentsEnd < 0 {
+		segmentsEnd = len(m.items)
+	}
 
-	// 重建 SegmentOrder
+	// 重建 SegmentOrder（只包含 SEGMENTS 区域内的项）
 	var order []string
-	for i := segmentsStart; i < len(m.items); i++ {
+	for i := segmentsStart; i < segmentsEnd; i++ {
 		if !m.items[i].isHeader {
 			order = append(order, m.items[i].key)
 		}
@@ -424,7 +518,33 @@ func (m Model) View() string {
 
 		// 渲染行
 		var line string
-		if item.key == "theme" {
+		if item.isTextInput {
+			// 文本输入项显示
+			input := m.textInputs[item.textKey]
+			var displayValue string
+
+			if m.editing && m.cursor == i {
+				// 编辑模式：显示 textinput 的 View()
+				displayValue = input.View()
+			} else {
+				// 非编辑模式：显示当前值
+				value := input.Value()
+				if item.textKey == "cch_api_key" && value != "" {
+					// API Key 显示为 ****
+					displayValue = valueStyle.Render("****")
+				} else if value == "" {
+					displayValue = disabledStyle.Render("(empty)")
+				} else {
+					displayValue = valueStyle.Render(value)
+				}
+			}
+
+			if m.cursor == i {
+				line = fmt.Sprintf("%s%s  %s", cursor, selectedStyle.Render(item.label), displayValue)
+			} else {
+				line = fmt.Sprintf("%s%s  %s", cursor, normalStyle.Render(item.label), displayValue)
+			}
+		} else if item.key == "theme" {
 			// Theme 特殊显示
 			var themeValue string
 			if item.enabled {
@@ -477,12 +597,20 @@ func (m Model) View() string {
 	box := boxStyle.Render(content)
 
 	// 帮助栏
-	help := helpBarStyle.Render(
-		keyStyle.Render("↑↓") + " Navigate  " +
-			keyStyle.Render("Space") + " Toggle  " +
-			keyStyle.Render(ReorderKeyHint) + " Reorder  " +
-			keyStyle.Render("Esc") + " Save & Exit",
-	)
+	var help string
+	if m.editing {
+		help = helpBarStyle.Render(
+			keyStyle.Render("Enter") + " Save  " +
+				keyStyle.Render("Esc") + " Cancel",
+		)
+	} else {
+		help = helpBarStyle.Render(
+			keyStyle.Render("↑↓") + " Navigate  " +
+				keyStyle.Render("Space") + " Toggle  " +
+				keyStyle.Render(ReorderKeyHint) + " Reorder  " +
+				keyStyle.Render("Esc") + " Save & Exit",
+		)
+	}
 
 	// 调试信息
 	debug := fmt.Sprintf("\n  DEBUG: Last key = %q", m.debugKey)

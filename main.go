@@ -21,8 +21,8 @@ var (
 	configMode  = flag.Bool("c", false, "Open interactive configuration")
 	versionMode = flag.Bool("v", false, "Show version")
 	// CCH flags
-	cchApiKey = flag.String("k", "", "CCH API key")
-	cchURL    = flag.String("u", "", "CCH server URL")
+	cchApiKey = flag.String("k", "", "CCH API key(Optional)")
+	cchURL    = flag.String("u", "", "CCH server URL(Optional)")
 )
 
 func main() {
