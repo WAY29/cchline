@@ -19,6 +19,38 @@ var DefaultSegmentOrder = []string{
 	"context_window",
 }
 
+func defaultEnabledForSegment(name string) bool {
+	switch name {
+	case "model", "directory", "output_style", "context_window":
+		return true
+	default:
+		return false
+	}
+}
+
+// DefaultSegmentEnabledForOrder returns the default per-instance enabled flags for an order.
+// It excludes line breaks and enables only: model, directory, output_style, context_window.
+func DefaultSegmentEnabledForOrder(order []string) []bool {
+	enabled := make([]bool, 0, NonBreakSegmentCount(order))
+	for _, name := range order {
+		if name == LineBreakMarker {
+			continue
+		}
+		enabled = append(enabled, defaultEnabledForSegment(name))
+	}
+	return enabled
+}
+
+// NormalizeSegmentEnabled ensures enabled length matches NonBreakSegmentCount(order).
+// If mismatch, it returns DefaultSegmentEnabledForOrder(order).
+func NormalizeSegmentEnabled(order []string, enabled []bool) []bool {
+	expected := NonBreakSegmentCount(order)
+	if len(enabled) == expected {
+		return enabled
+	}
+	return DefaultSegmentEnabledForOrder(order)
+}
+
 // InputData is the JSON structure passed from Claude Code via stdin
 type InputData struct {
 	Model          ModelInfo       `json:"model"`
@@ -51,11 +83,10 @@ type OutputStyleInfo struct {
 
 // SimpleConfig is the TOML configuration structure
 type SimpleConfig struct {
-	Theme          ThemeMode      `toml:"theme"` // "default" or "nerd_font"
-	Separator      string         `toml:"separator"`
-	SegmentOrder   []string       `toml:"segment_order"`
-	SegmentEnabled []bool         `toml:"segment_enabled"`
-	Segments       SegmentToggles `toml:"segments"`
+	Theme          ThemeMode `toml:"theme"` // "default" or "nerd_font"
+	Separator      string    `toml:"separator"`
+	SegmentOrder   []string  `toml:"segment_order"`
+	SegmentEnabled []bool    `toml:"segment_enabled"`
 	// CCH Configuration
 	CCHApiKey string `toml:"cch_api_key"`
 	CCHURL    string `toml:"cch_url"`
@@ -144,29 +175,6 @@ func BuildSegmentEnabledFromToggles(order []string, toggles SegmentToggles) []bo
 	return enabled
 }
 
-// DeriveSegmentToggles derives global toggles from per-instance enabled flags.
-func DeriveSegmentToggles(order []string, enabled []bool) SegmentToggles {
-	var toggles SegmentToggles
-	idx := 0
-	for _, name := range order {
-		if name == LineBreakMarker {
-			continue
-		}
-		isEnabled := false
-		if idx < len(enabled) {
-			isEnabled = enabled[idx]
-		}
-		idx++
-		if !isEnabled {
-			continue
-		}
-		if p := SegmentTogglePtr(&toggles, name); p != nil {
-			*p = true
-		}
-	}
-	return toggles
-}
-
 // LoadConfig loads configuration from ~/.claude/cchline/config.toml
 // Returns default configuration if file doesn't exist
 func LoadConfig() (*SimpleConfig, error) {
@@ -177,24 +185,8 @@ func LoadConfig() (*SimpleConfig, error) {
 		Theme:        ThemeModeNerdFont,
 		Separator:    " | ",
 		SegmentOrder: DefaultSegmentOrder,
-		Segments: SegmentToggles{
-			Model:         true,
-			Directory:     true,
-			ContextWindow: true,
-			Usage:         false,
-			Cost:          false,
-			Session:       false,
-			OutputStyle:   true,
-			Update:        false,
-			// CCH Segments (disabled by default)
-			CCHModel:    false,
-			CCHProvider: false,
-			CCHCost:     false,
-			CCHRequests: false,
-			CCHLimits:   false,
-		},
 	}
-	config.SegmentEnabled = BuildSegmentEnabledFromToggles(config.SegmentOrder, config.Segments)
+	config.SegmentEnabled = DefaultSegmentEnabledForOrder(config.SegmentOrder)
 
 	data, err := os.ReadFile(configPath)
 	if err != nil {
@@ -202,29 +194,49 @@ func LoadConfig() (*SimpleConfig, error) {
 		return config, nil
 	}
 
-	if err := toml.Unmarshal(data, config); err != nil {
+	type diskConfig struct {
+		Theme          ThemeMode      `toml:"theme"`
+		Separator      string         `toml:"separator"`
+		SegmentOrder   []string       `toml:"segment_order"`
+		SegmentEnabled []bool         `toml:"segment_enabled"`
+		Segments       SegmentToggles `toml:"segments"` // legacy
+		CCHApiKey      string         `toml:"cch_api_key"`
+		CCHURL         string         `toml:"cch_url"`
+	}
+
+	var disk diskConfig
+	meta, err := toml.Decode(string(data), &disk)
+	if err != nil {
 		// Config format incompatible, use default config
 		return config, nil
 	}
 
 	// 确保有默认值
-	if config.Theme == "" {
-		config.Theme = ThemeModeNerdFont
+	if disk.Theme != "" {
+		config.Theme = disk.Theme
 	}
-	if config.Separator == "" {
-		config.Separator = " | "
+	if disk.Separator != "" {
+		config.Separator = disk.Separator
 	}
 	// 如果 SegmentOrder 为空，使用默认顺序
-	if len(config.SegmentOrder) == 0 {
+	if len(disk.SegmentOrder) > 0 {
+		config.SegmentOrder = disk.SegmentOrder
+	} else if len(config.SegmentOrder) == 0 {
 		config.SegmentOrder = make([]string, len(DefaultSegmentOrder))
 		copy(config.SegmentOrder, DefaultSegmentOrder)
 	}
 
+	config.CCHApiKey = disk.CCHApiKey
+	config.CCHURL = disk.CCHURL
+
 	expectedEnabled := NonBreakSegmentCount(config.SegmentOrder)
-	if len(config.SegmentEnabled) != expectedEnabled {
-		config.SegmentEnabled = BuildSegmentEnabledFromToggles(config.SegmentOrder, config.Segments)
+	if len(disk.SegmentEnabled) == expectedEnabled {
+		config.SegmentEnabled = disk.SegmentEnabled
+	} else if meta.IsDefined("segments") {
+		config.SegmentEnabled = BuildSegmentEnabledFromToggles(config.SegmentOrder, disk.Segments)
+	} else {
+		config.SegmentEnabled = DefaultSegmentEnabledForOrder(config.SegmentOrder)
 	}
-	config.Segments = DeriveSegmentToggles(config.SegmentOrder, config.SegmentEnabled)
 
 	return config, nil
 }

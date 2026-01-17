@@ -99,11 +99,7 @@ func main() {
 }
 
 func collectAllSegments(cfg *config.SimpleConfig, input *config.InputData, cchClient *cch.Client) []segment.SegmentResult {
-	expectedEnabled := config.NonBreakSegmentCount(cfg.SegmentOrder)
-	if len(cfg.SegmentEnabled) != expectedEnabled {
-		cfg.SegmentEnabled = config.BuildSegmentEnabledFromToggles(cfg.SegmentOrder, cfg.Segments)
-	}
-	cfg.Segments = config.DeriveSegmentToggles(cfg.SegmentOrder, cfg.SegmentEnabled)
+	cfg.SegmentEnabled = config.NormalizeSegmentEnabled(cfg.SegmentOrder, cfg.SegmentEnabled)
 
 	// Create a map of segment ID to collector
 	collectorMap := map[string]struct {

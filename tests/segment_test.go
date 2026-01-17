@@ -1218,12 +1218,13 @@ func TestDirectorySegmentPreservesCase(t *testing.T) {
 // TestSimpleConfigStructure tests SimpleConfig structure
 func TestSimpleConfigStructure(t *testing.T) {
 	cfg := &config.SimpleConfig{
-		Theme:     config.ThemeModeNerdFont,
-		Separator: " | ",
-		Segments: config.SegmentToggles{
-			Model:     true,
-			Directory: true,
-			Git:       true,
+		Theme:        config.ThemeModeNerdFont,
+		Separator:    " | ",
+		SegmentOrder: []string{"model", "directory", "git"},
+		SegmentEnabled: []bool{
+			true,
+			true,
+			true,
 		},
 		CCHApiKey: "test-api-key",
 		CCHURL:    "http://localhost:8000",
@@ -1237,7 +1238,7 @@ func TestSimpleConfigStructure(t *testing.T) {
 		t.Errorf("expected Separator to be ' | ', got %q", cfg.Separator)
 	}
 
-	if !cfg.Segments.Model {
+	if len(cfg.SegmentEnabled) == 0 || !cfg.SegmentEnabled[0] {
 		t.Error("expected Model segment to be enabled")
 	}
 

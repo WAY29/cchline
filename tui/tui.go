@@ -13,6 +13,23 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+type installStatusMsg struct {
+	status       installStatus
+	installedVer *semVer
+	currentVer   *semVer
+}
+
+func fetchInstallStatusCmd() tea.Cmd {
+	return func() tea.Msg {
+		status, installedVer, currentVer := getInstallStatus()
+		return installStatusMsg{
+			status:       status,
+			installedVer: installedVer,
+			currentVer:   currentVer,
+		}
+	}
+}
+
 // 样式定义
 var (
 	// 标题样式
@@ -126,15 +143,16 @@ type Model struct {
 	segmentPickerOpen   bool
 	segmentPickerCursor int
 	segmentPickerInput  textinput.Model
+
+	installStatusLoading bool
+	installStatusValue   installStatus
+	installInstalledVer  *semVer
+	installCurrentVer    *semVer
 }
 
 // NewModel 创建新的 TUI 模型
 func NewModel(cfg *config.SimpleConfig) Model {
-	expectedEnabled := config.NonBreakSegmentCount(cfg.SegmentOrder)
-	if len(cfg.SegmentEnabled) != expectedEnabled {
-		cfg.SegmentEnabled = config.BuildSegmentEnabledFromToggles(cfg.SegmentOrder, cfg.Segments)
-	}
-	cfg.Segments = config.DeriveSegmentToggles(cfg.SegmentOrder, cfg.SegmentEnabled)
+	cfg.SegmentEnabled = config.NormalizeSegmentEnabled(cfg.SegmentOrder, cfg.SegmentEnabled)
 
 	items := []menuItem{
 		// Theme 设置
@@ -216,6 +234,8 @@ func NewModel(cfg *config.SimpleConfig) Model {
 		segmentPickerOpen:   false,
 		segmentPickerCursor: 0,
 		segmentPickerInput:  segmentPickerInput,
+
+		installStatusLoading: true,
 	}
 }
 
@@ -625,10 +645,25 @@ func (m Model) buildLayout(width, height int) layout {
 		previewContent := limitANSILines(m.generatePreview(), previewMaxLines, previewInnerWidth)
 		previewBox = previewBoxStyle.Render(previewContent)
 
-		if isInstalled() {
-			installStatus = "  " + enabledStyle.Render("● 已安装")
+		if m.installStatusLoading {
+			installStatus = "  " + disabledStyle.Render("◌ 检测中")
 		} else {
-			installStatus = "  " + disabledStyle.Render("○ 未安装")
+			switch m.installStatusValue {
+			case installStatusInstalled:
+				installStatus = "  " + enabledStyle.Render("● 已安装")
+				if m.installInstalledVer != nil && m.installCurrentVer != nil {
+					installStatus += " " + disabledStyle.Render(fmt.Sprintf("(installed %d.%d.%d, current %d.%d.%d)", m.installInstalledVer.major, m.installInstalledVer.minor, m.installInstalledVer.patch, m.installCurrentVer.major, m.installCurrentVer.minor, m.installCurrentVer.patch))
+				}
+			case installStatusOutdated:
+				installStatus = "  " + valueStyle.Render("◐ 版本过旧")
+				if m.installInstalledVer != nil && m.installCurrentVer != nil {
+					installStatus += " " + disabledStyle.Render(fmt.Sprintf("(installed %d.%d.%d < current %d.%d.%d)", m.installInstalledVer.major, m.installInstalledVer.minor, m.installInstalledVer.patch, m.installCurrentVer.major, m.installCurrentVer.minor, m.installCurrentVer.patch))
+				}
+			case installStatusUnknown:
+				installStatus = "  " + valueStyle.Render("◑ 版本未知")
+			default:
+				installStatus = "  " + disabledStyle.Render("○ 未安装")
+			}
 		}
 		installStatus = ansi.Truncate(installStatus, totalWidth, "")
 
@@ -806,7 +841,7 @@ func (m Model) generatePreview() string {
 
 // Init 初始化
 func (m Model) Init() tea.Cmd {
-	return nil
+	return fetchInstallStatusCmd()
 }
 
 // Update 更新
@@ -815,6 +850,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+
+	case installStatusMsg:
+		m.installStatusLoading = false
+		m.installStatusValue = msg.status
+		m.installInstalledVer = msg.installedVer
+		m.installCurrentVer = msg.currentVer
 
 	case tea.KeyMsg:
 		// 调试：记录按键
@@ -860,10 +901,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "y", "Y":
 				// 执行确认的操作
 				var err error
+				needsRefreshInstallStatus := false
 				if m.confirmAction == "install" {
 					err = m.installStatusLine()
 					if err == nil {
 						m.statusMessage = "✓ 安装成功"
+						needsRefreshInstallStatus = true
 					} else {
 						m.statusMessage = "✗ " + err.Error()
 					}
@@ -871,6 +914,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					err = m.uninstallStatusLine()
 					if err == nil {
 						m.statusMessage = "✓ 卸载成功"
+						needsRefreshInstallStatus = true
 					} else {
 						m.statusMessage = "✗ " + err.Error()
 					}
@@ -880,6 +924,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.confirmAction = ""
 				m.confirmRow = -1
+				if needsRefreshInstallStatus {
+					m.installStatusLoading = true
+					return m, fetchInstallStatusCmd()
+				}
 				return m, nil
 			case "n", "N", "esc":
 				// 取消操作

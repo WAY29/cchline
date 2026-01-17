@@ -64,22 +64,10 @@ func TestViewFitsTerminalAndPreviewTruncates(t *testing.T) {
 			config.LineBreakMarker,
 			"context_window",
 		},
-		Segments: config.SegmentToggles{
-			Model:         true,
-			Directory:     true,
-			Git:           true,
-			ContextWindow: true,
-			Usage:         true,
-			Cost:          true,
-			Session:       true,
-			OutputStyle:   true,
-			Update:        true,
-			CCHModel:      true,
-			CCHProvider:   true,
-			CCHCost:       true,
-			CCHRequests:   true,
-			CCHLimits:     true,
-		},
+	}
+	cfg.SegmentEnabled = make([]bool, config.NonBreakSegmentCount(cfg.SegmentOrder))
+	for i := range cfg.SegmentEnabled {
+		cfg.SegmentEnabled[i] = true
 	}
 
 	m := NewModel(cfg)

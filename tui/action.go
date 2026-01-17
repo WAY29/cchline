@@ -2,15 +2,19 @@ package tui
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
 	"github.com/WAY29/cchline/config"
 )
+
+var errStatusLineNotInstalled = errors.New("statusLine not installed")
 
 // saveTextInputValue 保存文本输入的值到配置
 func (m *Model) saveTextInputValue() {
@@ -383,7 +387,6 @@ func (m *Model) syncSegmentOrder() {
 	order, enabled := rowsToSegmentOrder(m.segmentRows)
 	m.config.SegmentOrder = order
 	m.config.SegmentEnabled = enabled
-	m.config.Segments = config.DeriveSegmentToggles(order, enabled)
 }
 
 func (m *Model) toggleCurrentSegmentInstanceEnabled() {
@@ -645,35 +648,6 @@ func (m *Model) toggleItem() {
 		} else {
 			m.config.Theme = config.ThemeModeDefault
 		}
-	case "model":
-		m.config.Segments.Model = item.enabled
-	case "directory":
-		m.config.Segments.Directory = item.enabled
-	case "git":
-		m.config.Segments.Git = item.enabled
-	case "context_window":
-		m.config.Segments.ContextWindow = item.enabled
-	case "usage":
-		m.config.Segments.Usage = item.enabled
-	case "cost":
-		m.config.Segments.Cost = item.enabled
-	case "session":
-		m.config.Segments.Session = item.enabled
-	case "output_style":
-		m.config.Segments.OutputStyle = item.enabled
-	case "update":
-		m.config.Segments.Update = item.enabled
-	// CCH Segments
-	case "cch_model":
-		m.config.Segments.CCHModel = item.enabled
-	case "cch_provider":
-		m.config.Segments.CCHProvider = item.enabled
-	case "cch_cost":
-		m.config.Segments.CCHCost = item.enabled
-	case "cch_requests":
-		m.config.Segments.CCHRequests = item.enabled
-	case "cch_limits":
-		m.config.Segments.CCHLimits = item.enabled
 	}
 }
 
@@ -789,38 +763,159 @@ func (m *Model) uninstallStatusLine() error {
 
 // isInstalled 检查 cchline 是否已安装到 Claude Code
 func isInstalled() bool {
+	status, _, _ := getInstallStatus()
+	return status == installStatusInstalled
+}
+
+type installStatus int
+
+const (
+	installStatusNotInstalled installStatus = iota
+	installStatusInstalled
+	installStatusOutdated
+	installStatusUnknown
+)
+
+type semVer struct {
+	major int
+	minor int
+	patch int
+}
+
+func parseSemVerToken(token string) (semVer, bool) {
+	token = strings.TrimSpace(token)
+	token = strings.TrimPrefix(token, "v")
+	token = strings.SplitN(token, "-", 2)[0]
+	token = strings.SplitN(token, "+", 2)[0]
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return semVer{}, false
+	}
+
+	major, err := strconv.Atoi(parts[0])
+	if err != nil || major < 0 {
+		return semVer{}, false
+	}
+	minor, err := strconv.Atoi(parts[1])
+	if err != nil || minor < 0 {
+		return semVer{}, false
+	}
+	patch, err := strconv.Atoi(parts[2])
+	if err != nil || patch < 0 {
+		return semVer{}, false
+	}
+
+	return semVer{major: major, minor: minor, patch: patch}, true
+}
+
+func compareSemVer(a, b semVer) int {
+	if a.major != b.major {
+		if a.major < b.major {
+			return -1
+		}
+		return 1
+	}
+	if a.minor != b.minor {
+		if a.minor < b.minor {
+			return -1
+		}
+		return 1
+	}
+	if a.patch != b.patch {
+		if a.patch < b.patch {
+			return -1
+		}
+		return 1
+	}
+	return 0
+}
+
+func parseCCHLineVersionOutput(out []byte) (isDev bool, ver semVer, ok bool) {
+	s := strings.TrimSpace(string(out))
+	if s == "" {
+		return false, semVer{}, false
+	}
+
+	fields := strings.Fields(s)
+	for _, f := range fields {
+		if f == "dev" {
+			return true, semVer{}, true
+		}
+	}
+
+	for i := len(fields) - 1; i >= 0; i-- {
+		if v, ok := parseSemVerToken(fields[i]); ok {
+			return false, v, true
+		}
+	}
+
+	return false, semVer{}, false
+}
+
+func readStatusLineCommandFromSettings() (string, error) {
 	settingsPath := getSettingsPath()
 	data, err := os.ReadFile(settingsPath)
 	if err != nil {
-		return false
+		if os.IsNotExist(err) {
+			return "", errStatusLineNotInstalled
+		}
+		return "", err
 	}
 
 	var settings map[string]any
 	if err := json.Unmarshal(data, &settings); err != nil {
-		return false
+		return "", err
 	}
 
 	statusLine, exists := settings["statusLine"]
 	if !exists {
-		return false
+		return "", errStatusLineNotInstalled
 	}
-
-	// 提取 command 字段
 	statusLineMap, ok := statusLine.(map[string]any)
 	if !ok {
-		return false
+		return "", errors.New("statusLine is not an object")
 	}
-
 	command, ok := statusLineMap["command"].(string)
 	if !ok || command == "" {
-		return false
+		return "", errors.New("statusLine.command missing")
 	}
+	return command, nil
+}
 
-	// 执行 command -v 检查输出是否包含 cchline
-	out, err := exec.Command(command, "-v").Output()
+func getInstallStatus() (installStatus, *semVer, *semVer) {
+	command, err := readStatusLineCommandFromSettings()
 	if err != nil {
-		return false
+		if errors.Is(err, errStatusLineNotInstalled) {
+			return installStatusNotInstalled, nil, nil
+		}
+		return installStatusUnknown, nil, nil
 	}
 
-	return strings.Contains(string(out), "cchline")
+	installedOut, err := exec.Command(command, "-v").Output()
+	if err != nil {
+		return installStatusUnknown, nil, nil
+	}
+	installedIsDev, installedSem, installedOK := parseCCHLineVersionOutput(installedOut)
+
+	currentPath, err := getExecutablePath()
+	if err != nil {
+		return installStatusUnknown, nil, nil
+	}
+	currentOut, err := exec.Command(currentPath, "-v").Output()
+	if err != nil {
+		return installStatusUnknown, nil, nil
+	}
+	currentIsDev, currentSem, currentOK := parseCCHLineVersionOutput(currentOut)
+
+	if installedIsDev || currentIsDev {
+		return installStatusInstalled, nil, nil
+	}
+	if !installedOK || !currentOK {
+		return installStatusUnknown, nil, nil
+	}
+
+	if compareSemVer(installedSem, currentSem) < 0 {
+		return installStatusOutdated, &installedSem, &currentSem
+	}
+	return installStatusInstalled, &installedSem, &currentSem
 }

@@ -11,15 +11,12 @@ import (
 
 // Helper function to create a test config
 func createTestConfig(theme config.ThemeMode, separator string) *config.SimpleConfig {
+	order := config.DefaultSegmentOrder
 	return &config.SimpleConfig{
-		Theme:     theme,
-		Separator: separator,
-		Segments: config.SegmentToggles{
-			Model:         true,
-			Directory:     true,
-			Git:           true,
-			ContextWindow: true,
-		},
+		Theme:          theme,
+		Separator:      separator,
+		SegmentOrder:   order,
+		SegmentEnabled: config.DefaultSegmentEnabledForOrder(order),
 	}
 }
 
@@ -419,10 +416,10 @@ func TestGenerateWithMetadata(t *testing.T) {
 	segmentWithMetadata := segment.SegmentResult{
 		ID: config.SegmentModel,
 		Data: segment.SegmentData{
-			Primary: "Sonnet 3.5",
+			Primary:   "Sonnet 3.5",
 			Secondary: "Claude",
 			Metadata: map[string]string{
-				"version": "3.5",
+				"version":  "3.5",
 				"provider": "Anthropic",
 			},
 		},

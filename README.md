@@ -31,7 +31,11 @@ sudo mv cchline /usr/local/bin/
 
 ```json
 {
-  "statusLineCommand": "/path/to/cchline"
+  "statusLine": {
+    "type": "command",
+    "command": "/path/to/cchline",
+    "padding": 0
+  }
 }
 ```
 
@@ -50,25 +54,12 @@ cchline -c
 ```toml
 theme = "nerd_font"  # "default" 或 "nerd_font"
 separator = " | "
-segment_order = ["model", "directory", "git", "context_window", "usage", "cost", "session", "output_style", "update", "cch_model", "cch_provider", "cch_cost", "cch_requests", "cch_limits"]
+segment_order = ["model", "directory", "output_style", "---", "context_window"]
+# `segment_enabled` 与 `segment_order` 中的每个 segment 实例一一对应（不包含 `---`）。
+# 允许重复 segment：每个实例的启用/禁用是独立的。
+segment_enabled = [true, true, true, true]
 cch_api_key = "your_api_key_here"
 cch_url = "https://your-cch-server.com"
-
-[segments]
-model = true
-directory = true
-git = true
-context_window = true
-usage = false
-cost = false
-session = false
-output_style = false
-update = false
-cch_model = false
-cch_provider = false
-cch_cost = false
-cch_requests = false
-cch_limits = false
 ```
 
 ## CCH 配置
