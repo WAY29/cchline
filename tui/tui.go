@@ -93,15 +93,16 @@ var SeparatorPresets = []SeparatorPreset{
 
 // menuItem 菜单项
 type menuItem struct {
-	label       string
-	key         string
-	enabled     bool
-	isHeader    bool
-	isSeparator bool   // 是否为分隔符选项
-	isSelected  bool   // 分隔符是否被选中
-	isTextInput bool   // 是否为文本输入项
-	textKey     string // 文本输入的配置键名 ("cch_url" 或 "cch_api_key")
-	isLineBreak bool   // 是否为换行分隔符
+	label        string
+	key          string
+	enabled      bool
+	isHeader     bool
+	isSeparator  bool   // 是否为分隔符选项
+	isSelected   bool   // 分隔符是否被选中
+	isTextInput  bool   // 是否为文本输入项
+	textKey      string // 文本输入的配置键名 ("cch_url" 或 "cch_api_key")
+	isSegmentRow bool   // 是否为 segments 行
+	rowIndex     int    // segmentRows 行号（仅 isSegmentRow 时有效）
 }
 
 // Model TUI 模型
@@ -116,11 +117,25 @@ type Model struct {
 	editing       bool                       // 是否处于编辑模式
 	textInputs    map[string]textinput.Model // 文本输入组件
 	confirmAction string                     // 待确认的操作: "install" 或 "uninstall"
+	confirmRow    int                        // 待确认删除的行号（仅 confirmAction == "delete_row" 时有效）
 	statusMessage string                     // 操作结果消息
+
+	segmentRows [][]segmentEntry // segments 按行存储
+	segmentCol  int              // 当前行内选中的 segment 下标
+
+	segmentPickerOpen   bool
+	segmentPickerCursor int
+	segmentPickerInput  textinput.Model
 }
 
 // NewModel 创建新的 TUI 模型
 func NewModel(cfg *config.SimpleConfig) Model {
+	expectedEnabled := config.NonBreakSegmentCount(cfg.SegmentOrder)
+	if len(cfg.SegmentEnabled) != expectedEnabled {
+		cfg.SegmentEnabled = config.BuildSegmentEnabledFromToggles(cfg.SegmentOrder, cfg.Segments)
+	}
+	cfg.Segments = config.DeriveSegmentToggles(cfg.SegmentOrder, cfg.SegmentEnabled)
+
 	items := []menuItem{
 		// Theme 设置
 		{label: "THEME", key: "", isHeader: true},
@@ -143,63 +158,12 @@ func NewModel(cfg *config.SimpleConfig) Model {
 	// Segments 设置
 	items = append(items, menuItem{label: "SEGMENTS", key: "", isHeader: true})
 
-	// segment 名称到标签的映射
-	segmentLabels := map[string]string{
-		"model":          "Model",
-		"directory":      "Directory",
-		"git":            "Git",
-		"context_window": "Context Window",
-		"usage":          "Usage",
-		"cost":           "Cost",
-		"session":        "Session",
-		"output_style":   "Output Style",
-		"update":         "Update",
-		// CCH Segments
-		"cch_model":    "CCH Model",
-		"cch_provider": "CCH Provider",
-		"cch_cost":     "CCH Cost",
-		"cch_requests": "CCH Requests",
-		"cch_limits":   "CCH Limits",
-	}
-
-	// segment 名称到启用状态的映射
-	segmentEnabled := map[string]bool{
-		"model":          cfg.Segments.Model,
-		"directory":      cfg.Segments.Directory,
-		"git":            cfg.Segments.Git,
-		"context_window": cfg.Segments.ContextWindow,
-		"usage":          cfg.Segments.Usage,
-		"cost":           cfg.Segments.Cost,
-		"session":        cfg.Segments.Session,
-		"output_style":   cfg.Segments.OutputStyle,
-		"update":         cfg.Segments.Update,
-		// CCH Segments
-		"cch_model":    cfg.Segments.CCHModel,
-		"cch_provider": cfg.Segments.CCHProvider,
-		"cch_cost":     cfg.Segments.CCHCost,
-		"cch_requests": cfg.Segments.CCHRequests,
-		"cch_limits":   cfg.Segments.CCHLimits,
-	}
-
-	// 按照配置的顺序添加 segments
-	for _, name := range cfg.SegmentOrder {
-		// 处理换行分隔符
-		if name == config.LineBreakMarker {
-			items = append(items, menuItem{
-				label:       "Line Break",
-				key:         config.LineBreakMarker,
-				isLineBreak: true,
-			})
-			continue
-		}
-
-		if label, exists := segmentLabels[name]; exists {
-			items = append(items, menuItem{
-				label:   label,
-				key:     name,
-				enabled: segmentEnabled[name],
-			})
-		}
+	segmentRows := segmentOrderToRows(cfg.SegmentOrder, cfg.SegmentEnabled)
+	for i := range segmentRows {
+		items = append(items, menuItem{
+			isSegmentRow: true,
+			rowIndex:     i,
+		})
 	}
 
 	// CCH SETTINGS 设置
@@ -224,6 +188,11 @@ func NewModel(cfg *config.SimpleConfig) Model {
 	apiKeyInput.SetValue(cfg.CCHApiKey)
 	textInputs["cch_api_key"] = apiKeyInput
 
+	segmentPickerInput := textinput.New()
+	segmentPickerInput.Placeholder = "Type to filter"
+	segmentPickerInput.Prompt = "Search: "
+	segmentPickerInput.CharLimit = 64
+
 	// 找到第一个非 header 项
 	cursor := 0
 	for i, item := range items {
@@ -234,12 +203,19 @@ func NewModel(cfg *config.SimpleConfig) Model {
 	}
 
 	return Model{
-		config:     cfg,
-		cursor:     cursor,
-		items:      items,
-		width:      0,
-		height:     0,
-		textInputs: textInputs,
+		config:      cfg,
+		cursor:      cursor,
+		items:       items,
+		width:       0,
+		height:      0,
+		textInputs:  textInputs,
+		confirmRow:  -1,
+		segmentRows: segmentRows,
+		segmentCol:  0,
+
+		segmentPickerOpen:   false,
+		segmentPickerCursor: 0,
+		segmentPickerInput:  segmentPickerInput,
 	}
 }
 
@@ -318,12 +294,23 @@ func (m Model) buildHelpText() string {
 		var actionText string
 		if m.confirmAction == "install" {
 			actionText = "安装 cchline 到 Claude Code?"
+		} else if m.confirmAction == "delete_row" {
+			actionText = fmt.Sprintf("删除第 %d 行?", m.confirmRow+1)
 		} else {
 			actionText = "从 Claude Code 卸载 cchline?"
 		}
 		return valueStyle.Render(actionText) + "  " +
 			keyStyle.Render("y") + " 确认  " +
 			keyStyle.Render("n") + " 取消"
+	}
+
+	if m.segmentPickerOpen {
+		return keyStyle.Render("↑↓") + " Select  " +
+			keyStyle.Render("Tab") + " Next  " +
+			keyStyle.Render("Shift+Tab") + " Prev  " +
+			keyStyle.Render("Enter") + " Apply  " +
+			keyStyle.Render("Esc") + " Close\n" +
+			keyStyle.Render("Type") + " Filter"
 	}
 
 	if m.editing {
@@ -333,12 +320,18 @@ func (m Model) buildHelpText() string {
 	}
 
 	return keyStyle.Render("↑↓") + " Navigate  " +
-		keyStyle.Render("←→") + " Separator  " +
+		keyStyle.Render("←→") + " Select  " +
 		keyStyle.Render("Space") + " Toggle  " +
-		keyStyle.Render("Enter") + " Edit Text\n" +
-		keyStyle.Render(ReorderKeyHint) + " Move  " +
-		keyStyle.Render("a") + " Add Break  " +
-		keyStyle.Render("d") + " Del Break\n" +
+		keyStyle.Render("Tab") + " Cycle  " +
+		keyStyle.Render("Shift+Tab") + " Reverse  " +
+		keyStyle.Render("t") + " Pick\n" +
+		keyStyle.Render("a") + " Add(model)  " +
+		keyStyle.Render("A") + " Add(cch_model)  " +
+		keyStyle.Render("d") + " Delete  " +
+		keyStyle.Render(ReorderKeyHint) + " Move\n" +
+		keyStyle.Render("n") + " New Line  " +
+		keyStyle.Render("x") + " Del Line  " +
+		keyStyle.Render("Enter") + " Edit  " +
 		keyStyle.Render("i") + " Install  " +
 		keyStyle.Render("u") + " Uninstall  " +
 		keyStyle.Render("Esc") + " Exit"
@@ -445,11 +438,36 @@ func (m Model) buildMenuLines(innerWidth int) (lines []string, itemLineIndex []i
 			} else {
 				line = fmt.Sprintf("%s%s  %s", cursor, normalStyle.Render(item.label), themeValue)
 			}
-		} else if item.isLineBreak {
-			if m.cursor == i {
-				line = fmt.Sprintf("%s%s", cursor, selectedStyle.Render("↵ Line Break"))
+		} else if item.isSegmentRow {
+			row := item.rowIndex
+			var segs []segmentEntry
+			if row >= 0 && row < len(m.segmentRows) {
+				segs = m.segmentRows[row]
+			}
+
+			prefix := disabledStyle.Render(fmt.Sprintf("L%d:", row+1))
+			if m.cursor != i {
+				prefix = disabledStyle.Render(fmt.Sprintf("L%d:", row+1))
+			}
+
+			if len(segs) == 0 {
+				line = fmt.Sprintf("%s%s %s", cursor, prefix, disabledStyle.Render("(empty)"))
 			} else {
-				line = fmt.Sprintf("%s%s", cursor, disabledStyle.Render("↵ Line Break"))
+				tokens := make([]string, 0, len(segs))
+				for idx, seg := range segs {
+					icon := disabledStyle.Render("○")
+					style := normalStyle
+					if seg.enabled {
+						icon = enabledStyle.Render("●")
+					} else {
+						style = disabledStyle
+					}
+					if m.cursor == i && idx == m.segmentCol {
+						style = selectedStyle
+					}
+					tokens = append(tokens, icon+style.Render(seg.name))
+				}
+				line = fmt.Sprintf("%s%s %s", cursor, prefix, strings.Join(tokens, "  "))
 			}
 		} else {
 			var status string
@@ -470,6 +488,86 @@ func (m Model) buildMenuLines(innerWidth int) (lines []string, itemLineIndex []i
 	}
 
 	return lines, itemLineIndex
+}
+
+func (m Model) filteredSegmentChoices() []string {
+	query := strings.TrimSpace(strings.ToLower(m.segmentPickerInput.Value()))
+	if query == "" {
+		return segmentCycle
+	}
+
+	parts := strings.Fields(query)
+	var matches []string
+	for _, name := range segmentCycle {
+		lowerName := strings.ToLower(name)
+		ok := true
+		for _, p := range parts {
+			if !strings.Contains(lowerName, p) {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			matches = append(matches, name)
+		}
+	}
+	return matches
+}
+
+func (m Model) buildSegmentPickerLines(innerWidth, innerHeight int) []string {
+	appendLine := func(lines *[]string, s string) {
+		*lines = append(*lines, ansi.Truncate(s, innerWidth, ""))
+	}
+
+	var lines []string
+	appendLine(&lines, sectionStyle.Render("  SEGMENT PICKER"))
+	appendLine(&lines, "  "+m.segmentPickerInput.View())
+
+	listHeight := innerHeight - len(lines)
+	if listHeight < 1 {
+		if len(lines) > innerHeight {
+			lines = lines[:innerHeight]
+		}
+		return lines
+	}
+
+	choices := m.filteredSegmentChoices()
+	if len(choices) == 0 {
+		appendLine(&lines, "  "+disabledStyle.Render("(no matches)"))
+		for len(lines) < innerHeight {
+			appendLine(&lines, "")
+		}
+		return lines
+	}
+
+	cursor := clampInt(m.segmentPickerCursor, 0, len(choices)-1)
+	start := 0
+	if len(choices) > listHeight {
+		start = cursor - listHeight/2
+		start = clampInt(start, 0, len(choices)-listHeight)
+	}
+	end := len(choices)
+	if len(choices) > listHeight {
+		end = start + listHeight
+	}
+
+	for i := start; i < end; i++ {
+		mark := "   "
+		style := normalStyle
+		if i == cursor {
+			mark = " ▸ "
+			style = selectedStyle
+		}
+		appendLine(&lines, mark+style.Render(choices[i]))
+	}
+
+	for len(lines) < innerHeight {
+		appendLine(&lines, "")
+	}
+	if len(lines) > innerHeight {
+		lines = lines[:innerHeight]
+	}
+	return lines
 }
 
 func (m Model) buildLayout(width, height int) layout {
@@ -612,6 +710,12 @@ func (m Model) buildLayout(width, height int) layout {
 		cursorLine = itemLineIndex[m.cursor]
 	}
 
+	if m.segmentPickerOpen {
+		menuLines = m.buildSegmentPickerLines(menuInnerWidth, menuInnerHeight)
+		itemLineIndex = nil
+		cursorLine = 0
+	}
+
 	start := 0
 	if len(menuLines) > menuInnerHeight && menuInnerHeight > 0 {
 		if cursorLine >= menuInnerHeight {
@@ -662,6 +766,7 @@ func (m Model) generatePreview() string {
 	// 根据当前配置构建 SegmentResult 列表
 	var results []segment.SegmentResult
 
+	enabledIdx := 0
 	for _, name := range m.config.SegmentOrder {
 		// 处理换行分隔符
 		if name == config.LineBreakMarker {
@@ -672,8 +777,12 @@ func (m Model) generatePreview() string {
 			continue
 		}
 
-		// 检查 segment 是否启用
-		if !m.isSegmentEnabled(name) {
+		instanceEnabled := true
+		if enabledIdx < len(m.config.SegmentEnabled) {
+			instanceEnabled = m.config.SegmentEnabled[enabledIdx]
+		}
+		enabledIdx++
+		if !instanceEnabled {
 			continue
 		}
 
@@ -693,42 +802,6 @@ func (m Model) generatePreview() string {
 	// 使用 StatusLineGenerator 生成预览
 	generator := render.NewStatusLineGenerator(m.config)
 	return generator.Generate(results)
-}
-
-// isSegmentEnabled 检查 segment 是否启用
-func (m Model) isSegmentEnabled(name string) bool {
-	switch name {
-	case "model":
-		return m.config.Segments.Model
-	case "directory":
-		return m.config.Segments.Directory
-	case "git":
-		return m.config.Segments.Git
-	case "context_window":
-		return m.config.Segments.ContextWindow
-	case "usage":
-		return m.config.Segments.Usage
-	case "cost":
-		return m.config.Segments.Cost
-	case "session":
-		return m.config.Segments.Session
-	case "output_style":
-		return m.config.Segments.OutputStyle
-	case "update":
-		return m.config.Segments.Update
-	case "cch_model":
-		return m.config.Segments.CCHModel
-	case "cch_provider":
-		return m.config.Segments.CCHProvider
-	case "cch_cost":
-		return m.config.Segments.CCHCost
-	case "cch_requests":
-		return m.config.Segments.CCHRequests
-	case "cch_limits":
-		return m.config.Segments.CCHLimits
-	default:
-		return false
-	}
 }
 
 // Init 初始化
@@ -801,12 +874,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					} else {
 						m.statusMessage = "✗ " + err.Error()
 					}
+				} else if m.confirmAction == "delete_row" {
+					m.deleteRowConfirmed()
+					m.statusMessage = "✓ 已删除"
 				}
 				m.confirmAction = ""
+				m.confirmRow = -1
 				return m, nil
 			case "n", "N", "esc":
 				// 取消操作
 				m.confirmAction = ""
+				m.confirmRow = -1
 				m.statusMessage = ""
 				return m, nil
 			default:
@@ -816,6 +894,59 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// 非编辑模式的按键处理
+		if m.segmentPickerOpen {
+			switch msg.String() {
+			case "esc":
+				m.segmentPickerOpen = false
+				m.segmentPickerInput.Blur()
+				return m, nil
+
+			case "enter":
+				choices := m.filteredSegmentChoices()
+				if len(choices) == 0 {
+					return m, nil
+				}
+				m.segmentPickerCursor = clampInt(m.segmentPickerCursor, 0, len(choices)-1)
+				m.setCurrentSegmentName(choices[m.segmentPickerCursor])
+				m.segmentPickerOpen = false
+				m.segmentPickerInput.Blur()
+				return m, nil
+
+			case "up", "k", "shift+tab", "backtab":
+				choices := m.filteredSegmentChoices()
+				if len(choices) == 0 {
+					return m, nil
+				}
+				m.segmentPickerCursor--
+				if m.segmentPickerCursor < 0 {
+					m.segmentPickerCursor = len(choices) - 1
+				}
+				return m, nil
+
+			case "down", "j", "tab":
+				choices := m.filteredSegmentChoices()
+				if len(choices) == 0 {
+					return m, nil
+				}
+				m.segmentPickerCursor++
+				if m.segmentPickerCursor >= len(choices) {
+					m.segmentPickerCursor = 0
+				}
+				return m, nil
+
+			default:
+				var cmd tea.Cmd
+				m.segmentPickerInput, cmd = m.segmentPickerInput.Update(msg)
+				choices := m.filteredSegmentChoices()
+				if len(choices) == 0 {
+					m.segmentPickerCursor = 0
+				} else {
+					m.segmentPickerCursor = clampInt(m.segmentPickerCursor, 0, len(choices)-1)
+				}
+				return m, cmd
+			}
+		}
+
 		switch msg.String() {
 		case "ctrl+c", "esc":
 			// 退出时自动保存
@@ -835,17 +966,53 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "right", "l":
 			m.moveCursorHorizontal(1)
 
-		case MoveUpKey:
-			m.moveSegment(-1)
-
-		case MoveDownKey:
-			m.moveSegment(1)
-
 		case "a":
-			m.insertLineBreak()
+			m.insertSegmentAfterCurrent("model")
+
+		case "A":
+			m.insertSegmentAfterCurrent("cch_model")
 
 		case "d":
-			m.deleteLineBreak()
+			m.deleteCurrentSegment()
+
+		case "tab":
+			m.cycleCurrentSegment()
+
+		case "shift+tab", "backtab":
+			m.cycleCurrentSegmentReverse()
+
+		case "t":
+			item := m.items[m.cursor]
+			if item.isSegmentRow {
+				m.segmentPickerInput.SetValue("")
+				m.segmentPickerInput.Focus()
+				m.segmentPickerOpen = true
+				m.segmentPickerCursor = 0
+
+				row := item.rowIndex
+				if row >= 0 && row < len(m.segmentRows) && m.segmentCol >= 0 && m.segmentCol < len(m.segmentRows[row]) {
+					current := m.segmentRows[row][m.segmentCol].name
+					for i := range segmentCycle {
+						if segmentCycle[i] == current {
+							m.segmentPickerCursor = i
+							break
+						}
+					}
+				}
+				return m, nil
+			}
+
+		case MoveLeftKey:
+			m.moveSegmentWithinRow(-1)
+
+		case MoveRightKey:
+			m.moveSegmentWithinRow(1)
+
+		case "n":
+			m.insertRowAfterCurrent()
+
+		case "x":
+			m.requestDeleteCurrentRow()
 
 		case "i":
 			// 安装确认
@@ -866,6 +1033,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				input := m.textInputs[item.textKey]
 				input.Focus()
 				m.textInputs[item.textKey] = input
+			} else if item.isSegmentRow {
+				m.toggleCurrentSegmentInstanceEnabled()
 			} else {
 				m.toggleItem()
 			}

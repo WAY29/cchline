@@ -43,13 +43,6 @@ sudo mv cchline /usr/local/bin/
 cchline -c
 ```
 
-操作说明：
-- `↑` `↓` / `j` `k` - 上下移动
-- `Space` - 切换启用/禁用
-- `Enter` - 编辑文本输入项
-- `Ctrl+U` - 清空当前文本输入
-- `Esc` - 保存并退出
-
 ### 手动修改配置文件
 
 路径：`~/.claude/cchline/config.toml`

@@ -2,12 +2,12 @@
 
 package tui
 
-// Unix/Linux 使用 Alt+j/k
+// Unix/Linux 使用 Alt+h/l
 const (
-	// MoveUpKey 向上移动 segment 的按键
-	MoveUpKey = "alt+k"
-	// MoveDownKey 向下移动 segment 的按键
-	MoveDownKey = "alt+j"
+	// MoveLeftKey 向左移动（行内）segment 的按键
+	MoveLeftKey = "alt+h"
+	// MoveRightKey 向右移动（行内）segment 的按键
+	MoveRightKey = "alt+l"
 	// ReorderKeyHint 帮助栏显示的按键提示
-	ReorderKeyHint = "Alt+j/k"
+	ReorderKeyHint = "Alt+h/l"
 )

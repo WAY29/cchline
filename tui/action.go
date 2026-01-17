@@ -116,6 +116,28 @@ func (m *Model) selectedSeparatorIndex(start, end int) int {
 }
 
 func (m *Model) moveCursorHorizontal(delta int) {
+	item := m.items[m.cursor]
+	if item.isSegmentRow {
+		row := item.rowIndex
+		if row < 0 || row >= len(m.segmentRows) {
+			m.segmentCol = 0
+			return
+		}
+		segs := m.segmentRows[row]
+		if len(segs) == 0 {
+			m.segmentCol = 0
+			return
+		}
+		next := m.segmentCol + delta
+		if next < 0 {
+			next = len(segs) - 1
+		} else if next >= len(segs) {
+			next = 0
+		}
+		m.segmentCol = next
+		return
+	}
+
 	_, start, end, ok := m.separatorBounds()
 	if !ok {
 		return
@@ -156,6 +178,7 @@ func (m *Model) moveCursorVertical(delta int) {
 			if newCursor >= 0 && newCursor < len(m.items) {
 				m.cursor = newCursor
 			}
+			m.clampSegmentColForCursor()
 			return
 		}
 
@@ -174,6 +197,7 @@ func (m *Model) moveCursorVertical(delta int) {
 		if newCursor >= 0 && newCursor < len(m.items) {
 			m.cursor = newCursor
 		}
+		m.clampSegmentColForCursor()
 		return
 	}
 
@@ -189,143 +213,406 @@ func (m *Model) moveCursorVertical(delta int) {
 			m.cursor = m.selectedSeparatorIndex(start, end)
 		}
 	}
+
+	m.clampSegmentColForCursor()
 }
 
-// moveSegment 移动 segment 顺序
-func (m *Model) moveSegment(delta int) {
-	item := m.items[m.cursor]
-	// 只能移动 segment 项（非 header、非 separator、非 theme、非 textInput）
-	if item.isHeader || item.isSeparator || item.key == "theme" || item.isTextInput {
-		return
+var segmentCycle = []string{
+	"model",
+	"directory",
+	"git",
+	"context_window",
+	"usage",
+	"cost",
+	"session",
+	"output_style",
+	"update",
+	"cch_model",
+	"cch_provider",
+	"cch_cost",
+	"cch_requests",
+	"cch_limits",
+}
+
+type segmentEntry struct {
+	name    string
+	enabled bool
+}
+
+func segmentOrderToRows(order []string, enabled []bool) [][]segmentEntry {
+	if len(order) == 0 {
+		return [][]segmentEntry{{}}
 	}
 
-	// 找到 SEGMENTS header 和 CCH SETTINGS header 的位置
-	segmentsStart := -1
-	segmentsEnd := -1
-	for i, it := range m.items {
-		if it.isHeader && it.label == "SEGMENTS" {
-			segmentsStart = i + 1
-		} else if it.isHeader && it.label == "CCH SETTINGS" {
-			segmentsEnd = i
-			break
+	var rows [][]segmentEntry
+	var current []segmentEntry
+	enabledIdx := 0
+	for _, seg := range order {
+		if seg == config.LineBreakMarker {
+			rows = append(rows, current)
+			current = nil
+			continue
 		}
-	}
-	if segmentsStart < 0 {
-		return
-	}
-	if segmentsEnd < 0 {
-		segmentsEnd = len(m.items)
-	}
-
-	// 计算当前 segment 在 segment 列表中的相对位置
-	segmentIndex := m.cursor - segmentsStart
-	newIndex := segmentIndex + delta
-
-	// 边界检查：只能在 SEGMENTS 区域内移动
-	segmentCount := segmentsEnd - segmentsStart
-	if newIndex < 0 || newIndex >= segmentCount {
-		return
-	}
-
-	// 交换 items
-	targetCursor := m.cursor + delta
-	m.items[m.cursor], m.items[targetCursor] = m.items[targetCursor], m.items[m.cursor]
-	m.cursor = targetCursor
-
-	// 更新配置中的 SegmentOrder
-	m.updateSegmentOrder()
-}
-
-// insertLineBreak 在当前 segment 后插入换行分隔符
-func (m *Model) insertLineBreak() {
-	item := m.items[m.cursor]
-	// 只能在 segment 项后插入（非 header、非 separator、非 theme、非 textInput、非 lineBreak）
-	if item.isHeader || item.isSeparator || item.key == "theme" || item.isTextInput || item.isLineBreak {
-		return
-	}
-
-	// 找到 SEGMENTS header 和 CCH SETTINGS header 的位置
-	segmentsStart := -1
-	segmentsEnd := -1
-	for i, it := range m.items {
-		if it.isHeader && it.label == "SEGMENTS" {
-			segmentsStart = i + 1
-		} else if it.isHeader && it.label == "CCH SETTINGS" {
-			segmentsEnd = i
-			break
+		entryEnabled := true
+		if enabledIdx < len(enabled) {
+			entryEnabled = enabled[enabledIdx]
 		}
+		enabledIdx++
+		current = append(current, segmentEntry{name: seg, enabled: entryEnabled})
 	}
-	if segmentsStart < 0 || m.cursor < segmentsStart || m.cursor >= segmentsEnd {
-		return
+	rows = append(rows, current)
+	if len(rows) == 0 {
+		rows = [][]segmentEntry{{}}
 	}
-
-	// 在当前位置后插入换行分隔符
-	newItem := menuItem{
-		label:       "Line Break",
-		key:         config.LineBreakMarker,
-		isLineBreak: true,
-	}
-
-	// 插入到 cursor+1 位置
-	insertPos := m.cursor + 1
-	m.items = append(m.items[:insertPos], append([]menuItem{newItem}, m.items[insertPos:]...)...)
-
-	// 更新配置中的 SegmentOrder
-	m.updateSegmentOrder()
+	return rows
 }
 
-// deleteLineBreak 删除当前换行分隔符
-func (m *Model) deleteLineBreak() {
-	item := m.items[m.cursor]
-	// 只能删除换行分隔符
-	if !item.isLineBreak {
-		return
+func rowsToSegmentOrder(rows [][]segmentEntry) ([]string, []bool) {
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	if len(rows) == 1 && len(rows[0]) == 0 {
+		return nil, nil
 	}
 
-	// 删除当前项
-	m.items = append(m.items[:m.cursor], m.items[m.cursor+1:]...)
-
-	// 调整光标位置
-	if m.cursor >= len(m.items) {
-		m.cursor = len(m.items) - 1
-	}
-	// 跳过 header
-	for m.cursor >= 0 && m.items[m.cursor].isHeader {
-		m.cursor--
-	}
-
-	// 更新配置中的 SegmentOrder
-	m.updateSegmentOrder()
-}
-
-// updateSegmentOrder 更新配置中的 segment 顺序
-func (m *Model) updateSegmentOrder() {
-	// 找到 SEGMENTS header 和 CCH SETTINGS header 的位置
-	segmentsStart := -1
-	segmentsEnd := -1
-	for i, it := range m.items {
-		if it.isHeader && it.label == "SEGMENTS" {
-			segmentsStart = i + 1
-		} else if it.isHeader && it.label == "CCH SETTINGS" {
-			segmentsEnd = i
-			break
-		}
-	}
-	if segmentsStart < 0 {
-		return
-	}
-	if segmentsEnd < 0 {
-		segmentsEnd = len(m.items)
-	}
-
-	// 重建 SegmentOrder（只包含 SEGMENTS 区域内的项）
 	var order []string
-	for i := segmentsStart; i < segmentsEnd; i++ {
-		if !m.items[i].isHeader {
-			order = append(order, m.items[i].key)
+	var enabled []bool
+	for i, row := range rows {
+		for _, entry := range row {
+			order = append(order, entry.name)
+			enabled = append(enabled, entry.enabled)
+		}
+		if i != len(rows)-1 {
+			order = append(order, config.LineBreakMarker)
 		}
 	}
+	return order, enabled
+}
+
+func (m *Model) segmentRowItemsRange() (start, end int, ok bool) {
+	segmentsHeader := -1
+	cchHeader := -1
+	for i, it := range m.items {
+		if it.isHeader && it.label == "SEGMENTS" {
+			segmentsHeader = i
+			continue
+		}
+		if it.isHeader && it.label == "CCH SETTINGS" {
+			cchHeader = i
+			break
+		}
+	}
+	if segmentsHeader < 0 {
+		return 0, 0, false
+	}
+	start = segmentsHeader + 1
+	if cchHeader < 0 {
+		end = len(m.items)
+	} else {
+		end = cchHeader
+	}
+	if start > end {
+		return 0, 0, false
+	}
+	return start, end, true
+}
+
+func (m *Model) rebuildSegmentRowItems() {
+	start, end, ok := m.segmentRowItemsRange()
+	if !ok {
+		return
+	}
+
+	prefix := append([]menuItem(nil), m.items[:start]...)
+	suffix := append([]menuItem(nil), m.items[end:]...)
+
+	rows := m.segmentRows
+	newItems := make([]menuItem, 0, len(prefix)+len(rows)+len(suffix))
+	newItems = append(newItems, prefix...)
+	for i := range rows {
+		newItems = append(newItems, menuItem{
+			isSegmentRow: true,
+			rowIndex:     i,
+		})
+	}
+	newItems = append(newItems, suffix...)
+	m.items = newItems
+}
+
+func (m *Model) currentSegmentRowIndex() (int, bool) {
+	if m.cursor < 0 || m.cursor >= len(m.items) {
+		return 0, false
+	}
+	item := m.items[m.cursor]
+	if !item.isSegmentRow {
+		return 0, false
+	}
+	if item.rowIndex < 0 || item.rowIndex >= len(m.segmentRows) {
+		return 0, false
+	}
+	return item.rowIndex, true
+}
+
+func (m *Model) setCursorToSegmentRow(row int) {
+	start, _, ok := m.segmentRowItemsRange()
+	if !ok {
+		return
+	}
+	if len(m.segmentRows) == 0 {
+		return
+	}
+	row = clampInt(row, 0, len(m.segmentRows)-1)
+	m.cursor = start + row
+	m.clampSegmentColForCursor()
+}
+
+func (m *Model) clampSegmentColForCursor() {
+	row, ok := m.currentSegmentRowIndex()
+	if !ok {
+		return
+	}
+	entries := m.segmentRows[row]
+	if len(entries) == 0 {
+		m.segmentCol = 0
+		return
+	}
+	m.segmentCol = clampInt(m.segmentCol, 0, len(entries)-1)
+}
+
+func (m *Model) syncSegmentOrder() {
+	order, enabled := rowsToSegmentOrder(m.segmentRows)
 	m.config.SegmentOrder = order
+	m.config.SegmentEnabled = enabled
+	m.config.Segments = config.DeriveSegmentToggles(order, enabled)
+}
+
+func (m *Model) toggleCurrentSegmentInstanceEnabled() {
+	row, ok := m.currentSegmentRowIndex()
+	if !ok {
+		return
+	}
+	entries := m.segmentRows[row]
+	if len(entries) == 0 {
+		return
+	}
+
+	col := clampInt(m.segmentCol, 0, len(entries)-1)
+	entries[col].enabled = !entries[col].enabled
+	m.segmentRows[row] = entries
+	m.syncSegmentOrder()
+}
+
+func (m *Model) insertSegmentAfterCurrent(seg string) {
+	row, ok := m.currentSegmentRowIndex()
+	if !ok {
+		return
+	}
+
+	entries := m.segmentRows[row]
+	insertPos := 0
+	if len(entries) == 0 {
+		insertPos = 0
+	} else {
+		insertPos = clampInt(m.segmentCol+1, 0, len(entries))
+	}
+
+	newEntry := segmentEntry{name: seg, enabled: true}
+	entries = append(entries[:insertPos], append([]segmentEntry{newEntry}, entries[insertPos:]...)...)
+	m.segmentRows[row] = entries
+	m.segmentCol = insertPos
+	m.syncSegmentOrder()
+}
+
+func (m *Model) deleteCurrentSegment() {
+	row, ok := m.currentSegmentRowIndex()
+	if !ok {
+		return
+	}
+	entries := m.segmentRows[row]
+	if len(entries) == 0 {
+		return
+	}
+
+	col := clampInt(m.segmentCol, 0, len(entries)-1)
+	entries = append(entries[:col], entries[col+1:]...)
+	if len(entries) == 0 {
+		m.segmentRows = append(m.segmentRows[:row], m.segmentRows[row+1:]...)
+		if len(m.segmentRows) == 0 {
+			m.segmentRows = [][]segmentEntry{{}}
+			row = 0
+		} else if row >= len(m.segmentRows) {
+			row = len(m.segmentRows) - 1
+		}
+		m.segmentCol = 0
+		m.rebuildSegmentRowItems()
+		m.setCursorToSegmentRow(row)
+	} else {
+		m.segmentRows[row] = entries
+		if col >= len(entries) {
+			col = len(entries) - 1
+		}
+		m.segmentCol = col
+	}
+
+	m.syncSegmentOrder()
+}
+
+func (m *Model) cycleCurrentSegment() {
+	row, ok := m.currentSegmentRowIndex()
+	if !ok {
+		return
+	}
+	entries := m.segmentRows[row]
+
+	if len(entries) == 0 {
+		m.segmentRows[row] = []segmentEntry{{name: segmentCycle[0], enabled: true}}
+		m.segmentCol = 0
+		m.syncSegmentOrder()
+		return
+	}
+
+	col := clampInt(m.segmentCol, 0, len(entries)-1)
+	current := entries[col].name
+	idx := -1
+	for i := range segmentCycle {
+		if segmentCycle[i] == current {
+			idx = i
+			break
+		}
+	}
+	next := segmentCycle[0]
+	if idx >= 0 {
+		next = segmentCycle[(idx+1)%len(segmentCycle)]
+	}
+
+	entries[col].name = next
+	entries[col].enabled = true
+	m.segmentRows[row] = entries
+	m.syncSegmentOrder()
+}
+
+func (m *Model) cycleCurrentSegmentReverse() {
+	row, ok := m.currentSegmentRowIndex()
+	if !ok {
+		return
+	}
+	entries := m.segmentRows[row]
+
+	if len(entries) == 0 {
+		m.segmentRows[row] = []segmentEntry{{name: segmentCycle[0], enabled: true}}
+		m.segmentCol = 0
+		m.syncSegmentOrder()
+		return
+	}
+
+	col := clampInt(m.segmentCol, 0, len(entries)-1)
+	current := entries[col].name
+	idx := -1
+	for i := range segmentCycle {
+		if segmentCycle[i] == current {
+			idx = i
+			break
+		}
+	}
+
+	prev := segmentCycle[0]
+	if idx >= 0 {
+		prev = segmentCycle[(idx-1+len(segmentCycle))%len(segmentCycle)]
+	}
+
+	entries[col].name = prev
+	entries[col].enabled = true
+	m.segmentRows[row] = entries
+	m.syncSegmentOrder()
+}
+
+func (m *Model) setCurrentSegmentName(name string) {
+	row, ok := m.currentSegmentRowIndex()
+	if !ok {
+		return
+	}
+
+	entries := m.segmentRows[row]
+	if len(entries) == 0 {
+		m.segmentRows[row] = []segmentEntry{{name: name, enabled: true}}
+		m.segmentCol = 0
+		m.syncSegmentOrder()
+		return
+	}
+
+	col := clampInt(m.segmentCol, 0, len(entries)-1)
+	entries[col].name = name
+	entries[col].enabled = true
+	m.segmentRows[row] = entries
+	m.syncSegmentOrder()
+}
+
+func (m *Model) moveSegmentWithinRow(delta int) {
+	row, ok := m.currentSegmentRowIndex()
+	if !ok {
+		return
+	}
+	entries := m.segmentRows[row]
+	if len(entries) < 2 {
+		return
+	}
+
+	col := clampInt(m.segmentCol, 0, len(entries)-1)
+	target := col + delta
+	if target < 0 || target >= len(entries) {
+		return
+	}
+
+	entries[col], entries[target] = entries[target], entries[col]
+	m.segmentRows[row] = entries
+	m.segmentCol = target
+	m.syncSegmentOrder()
+}
+
+func (m *Model) insertRowAfterCurrent() {
+	row, ok := m.currentSegmentRowIndex()
+	if !ok {
+		return
+	}
+	insertPos := row + 1
+
+	newRow := []segmentEntry{{name: "model", enabled: true}}
+
+	m.segmentRows = append(m.segmentRows[:insertPos], append([][]segmentEntry{newRow}, m.segmentRows[insertPos:]...)...)
+	m.rebuildSegmentRowItems()
+	m.segmentCol = 0
+	m.setCursorToSegmentRow(insertPos)
+	m.syncSegmentOrder()
+}
+
+func (m *Model) requestDeleteCurrentRow() {
+	row, ok := m.currentSegmentRowIndex()
+	if !ok {
+		return
+	}
+	m.confirmAction = "delete_row"
+	m.confirmRow = row
+	m.statusMessage = ""
+}
+
+func (m *Model) deleteRowConfirmed() {
+	row := m.confirmRow
+	if row < 0 || row >= len(m.segmentRows) {
+		return
+	}
+
+	m.segmentRows = append(m.segmentRows[:row], m.segmentRows[row+1:]...)
+	if len(m.segmentRows) == 0 {
+		m.segmentRows = [][]segmentEntry{{}}
+		row = 0
+	} else if row >= len(m.segmentRows) {
+		row = len(m.segmentRows) - 1
+	}
+
+	m.rebuildSegmentRowItems()
+	m.segmentCol = 0
+	m.setCursorToSegmentRow(row)
+	m.syncSegmentOrder()
 }
 
 // toggleItem 切换选项

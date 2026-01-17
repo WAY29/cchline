@@ -8,6 +8,49 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+func TestSegmentOrderRowsRoundTrip(t *testing.T) {
+	cases := [][]string{
+		{"model", "directory", config.LineBreakMarker, "context_window"},
+		{"model", config.LineBreakMarker, config.LineBreakMarker, "context_window"},
+		{},
+	}
+
+	for _, order := range cases {
+		wantEnabled := make([]bool, config.NonBreakSegmentCount(order))
+		for i := range wantEnabled {
+			wantEnabled[i] = i%2 == 0
+		}
+
+		rows := segmentOrderToRows(order, wantEnabled)
+		gotOrder, gotEnabled := rowsToSegmentOrder(rows)
+
+		if len(order) == 0 {
+			if len(gotOrder) != 0 || len(gotEnabled) != 0 {
+				t.Fatalf("expected empty order to remain empty, got order=%#v enabled=%#v", gotOrder, gotEnabled)
+			}
+			continue
+		}
+
+		if len(gotOrder) != len(order) {
+			t.Fatalf("expected order len %d, got %d (got=%#v, want=%#v)", len(order), len(gotOrder), gotOrder, order)
+		}
+		for i := range order {
+			if gotOrder[i] != order[i] {
+				t.Fatalf("mismatch at %d: got=%q want=%q (got=%#v, want=%#v)", i, gotOrder[i], order[i], gotOrder, order)
+			}
+		}
+
+		if len(gotEnabled) != len(wantEnabled) {
+			t.Fatalf("expected enabled len %d, got %d (got=%#v, want=%#v)", len(wantEnabled), len(gotEnabled), gotEnabled, wantEnabled)
+		}
+		for i := range wantEnabled {
+			if gotEnabled[i] != wantEnabled[i] {
+				t.Fatalf("enabled mismatch at %d: got=%v want=%v (got=%#v, want=%#v)", i, gotEnabled[i], wantEnabled[i], gotEnabled, wantEnabled)
+			}
+		}
+	}
+}
+
 func TestViewFitsTerminalAndPreviewTruncates(t *testing.T) {
 	cfg := &config.SimpleConfig{
 		Theme:     config.ThemeModeNerdFont,

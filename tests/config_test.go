@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -424,45 +425,11 @@ func TestApplyColorWithEmptyString(t *testing.T) {
 	}
 }
 
-// TestDefaultSegmentOrder verifies DefaultSegmentOrder contains all 14 segments
+// TestDefaultSegmentOrder verifies DefaultSegmentOrder matches the default layout
 func TestDefaultSegmentOrder(t *testing.T) {
-	expectedCount := 14
-	if len(config.DefaultSegmentOrder) != expectedCount {
-		t.Errorf("expected %d segments in DefaultSegmentOrder, got %d", expectedCount, len(config.DefaultSegmentOrder))
-	}
-
-	expectedSegments := map[string]bool{
-		"model":          true,
-		"directory":      true,
-		"git":            true,
-		"context_window": true,
-		"usage":          true,
-		"cost":           true,
-		"session":        true,
-		"output_style":   true,
-		"update":         true,
-		"cch_model":      true,
-		"cch_provider":   true,
-		"cch_cost":       true,
-		"cch_requests":   true,
-		"cch_limits":     true,
-	}
-
-	foundSegments := make(map[string]bool)
-	for _, segment := range config.DefaultSegmentOrder {
-		foundSegments[segment] = true
-	}
-
-	for expected := range expectedSegments {
-		if !foundSegments[expected] {
-			t.Errorf("expected segment %q not found in DefaultSegmentOrder", expected)
-		}
-	}
-
-	for found := range foundSegments {
-		if !expectedSegments[found] {
-			t.Errorf("unexpected segment %q found in DefaultSegmentOrder", found)
-		}
+	want := []string{"model", "directory", "output_style", config.LineBreakMarker, "context_window"}
+	if !reflect.DeepEqual(config.DefaultSegmentOrder, want) {
+		t.Errorf("DefaultSegmentOrder mismatch: got=%#v want=%#v", config.DefaultSegmentOrder, want)
 	}
 }
 

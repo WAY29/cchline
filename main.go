@@ -99,81 +99,72 @@ func main() {
 }
 
 func collectAllSegments(cfg *config.SimpleConfig, input *config.InputData, cchClient *cch.Client) []segment.SegmentResult {
+	expectedEnabled := config.NonBreakSegmentCount(cfg.SegmentOrder)
+	if len(cfg.SegmentEnabled) != expectedEnabled {
+		cfg.SegmentEnabled = config.BuildSegmentEnabledFromToggles(cfg.SegmentOrder, cfg.Segments)
+	}
+	cfg.Segments = config.DeriveSegmentToggles(cfg.SegmentOrder, cfg.SegmentEnabled)
+
 	// Create a map of segment ID to collector
 	collectorMap := map[string]struct {
 		id      config.SegmentID
-		enabled bool
 		collect func(*config.InputData) segment.SegmentData
 	}{
 		"model": {
 			id:      config.SegmentModel,
-			enabled: cfg.Segments.Model,
 			collect: (&segment.ModelSegment{}).Collect,
 		},
 		"directory": {
 			id:      config.SegmentDirectory,
-			enabled: cfg.Segments.Directory,
 			collect: (&segment.DirectorySegment{}).Collect,
 		},
 		"git": {
 			id:      config.SegmentGit,
-			enabled: cfg.Segments.Git,
 			collect: (&segment.GitSegment{}).Collect,
 		},
 		"context_window": {
 			id:      config.SegmentContextWindow,
-			enabled: cfg.Segments.ContextWindow,
 			collect: (&segment.ContextWindowSegment{}).Collect,
 		},
 		"usage": {
 			id:      config.SegmentUsage,
-			enabled: cfg.Segments.Usage,
 			collect: (&segment.UsageSegment{}).Collect,
 		},
 		"cost": {
 			id:      config.SegmentCost,
-			enabled: cfg.Segments.Cost,
 			collect: (&segment.CostSegment{}).Collect,
 		},
 		"session": {
 			id:      config.SegmentSession,
-			enabled: cfg.Segments.Session,
 			collect: (&segment.SessionSegment{}).Collect,
 		},
 		"output_style": {
 			id:      config.SegmentOutputStyle,
-			enabled: cfg.Segments.OutputStyle,
 			collect: (&segment.OutputStyleSegment{}).Collect,
 		},
 		"update": {
 			id:      config.SegmentUpdate,
-			enabled: cfg.Segments.Update,
 			collect: (&segment.UpdateSegment{}).Collect,
 		},
 		// CCH Segments
 		"cch_model": {
 			id:      config.SegmentCCHModel,
-			enabled: cfg.Segments.CCHModel,
 			collect: (&segment.CCHModelSegment{Client: cchClient}).Collect,
 		},
 		"cch_provider": {
 			id:      config.SegmentCCHProvider,
-			enabled: cfg.Segments.CCHProvider,
 			collect: (&segment.CCHProviderSegment{Client: cchClient}).Collect,
 		},
 		"cch_cost": {
 			id:      config.SegmentCCHCost,
-			enabled: cfg.Segments.CCHCost,
 			collect: (&segment.CCHCostSegment{Client: cchClient}).Collect,
 		},
 		"cch_requests": {
 			id:      config.SegmentCCHRequests,
-			enabled: cfg.Segments.CCHRequests,
 			collect: (&segment.CCHRequestsSegment{Client: cchClient}).Collect,
 		},
 		"cch_limits": {
 			id:      config.SegmentCCHLimits,
-			enabled: cfg.Segments.CCHLimits,
 			collect: (&segment.CCHLimitsSegment{Client: cchClient}).Collect,
 		},
 	}
@@ -181,6 +172,7 @@ func collectAllSegments(cfg *config.SimpleConfig, input *config.InputData, cchCl
 	var results []segment.SegmentResult
 
 	// Collect segments in the order specified by cfg.SegmentOrder
+	enabledIdx := 0
 	for _, name := range cfg.SegmentOrder {
 		// Handle line break marker
 		if name == config.LineBreakMarker {
@@ -191,8 +183,17 @@ func collectAllSegments(cfg *config.SimpleConfig, input *config.InputData, cchCl
 			continue
 		}
 
+		instanceEnabled := true
+		if enabledIdx < len(cfg.SegmentEnabled) {
+			instanceEnabled = cfg.SegmentEnabled[enabledIdx]
+		}
+		enabledIdx++
+		if !instanceEnabled {
+			continue
+		}
+
 		collector, exists := collectorMap[name]
-		if !exists || !collector.enabled {
+		if !exists {
 			continue
 		}
 

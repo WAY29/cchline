@@ -14,19 +14,9 @@ const LineBreakMarker = "---"
 var DefaultSegmentOrder = []string{
 	"model",
 	"directory",
-	"git",
-	"context_window",
-	"usage",
-	"cost",
-	"session",
 	"output_style",
-	"update",
-	// CCH Segments
-	"cch_model",
-	"cch_provider",
-	"cch_cost",
-	"cch_requests",
-	"cch_limits",
+	LineBreakMarker,
+	"context_window",
 }
 
 // InputData is the JSON structure passed from Claude Code via stdin
@@ -61,10 +51,11 @@ type OutputStyleInfo struct {
 
 // SimpleConfig is the TOML configuration structure
 type SimpleConfig struct {
-	Theme        ThemeMode      `toml:"theme"`         // "default" or "nerd_font"
-	Separator    string         `toml:"separator"`
-	SegmentOrder []string       `toml:"segment_order"`
-	Segments     SegmentToggles `toml:"segments"`
+	Theme          ThemeMode      `toml:"theme"` // "default" or "nerd_font"
+	Separator      string         `toml:"separator"`
+	SegmentOrder   []string       `toml:"segment_order"`
+	SegmentEnabled []bool         `toml:"segment_enabled"`
+	Segments       SegmentToggles `toml:"segments"`
 	// CCH Configuration
 	CCHApiKey string `toml:"cch_api_key"`
 	CCHURL    string `toml:"cch_url"`
@@ -89,6 +80,93 @@ type SegmentToggles struct {
 	CCHLimits   bool `toml:"cch_limits"`
 }
 
+// NonBreakSegmentCount returns number of segments excluding line breaks.
+func NonBreakSegmentCount(order []string) int {
+	count := 0
+	for _, s := range order {
+		if s == LineBreakMarker {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+// SegmentTogglePtr returns pointer to toggle field for a segment name.
+func SegmentTogglePtr(toggles *SegmentToggles, name string) *bool {
+	switch name {
+	case "model":
+		return &toggles.Model
+	case "directory":
+		return &toggles.Directory
+	case "git":
+		return &toggles.Git
+	case "context_window":
+		return &toggles.ContextWindow
+	case "usage":
+		return &toggles.Usage
+	case "cost":
+		return &toggles.Cost
+	case "session":
+		return &toggles.Session
+	case "output_style":
+		return &toggles.OutputStyle
+	case "update":
+		return &toggles.Update
+	case "cch_model":
+		return &toggles.CCHModel
+	case "cch_provider":
+		return &toggles.CCHProvider
+	case "cch_cost":
+		return &toggles.CCHCost
+	case "cch_requests":
+		return &toggles.CCHRequests
+	case "cch_limits":
+		return &toggles.CCHLimits
+	default:
+		return nil
+	}
+}
+
+// BuildSegmentEnabledFromToggles expands global toggles into per-instance enabled flags.
+func BuildSegmentEnabledFromToggles(order []string, toggles SegmentToggles) []bool {
+	enabled := make([]bool, 0, NonBreakSegmentCount(order))
+	for _, name := range order {
+		if name == LineBreakMarker {
+			continue
+		}
+		if p := SegmentTogglePtr(&toggles, name); p != nil {
+			enabled = append(enabled, *p)
+		} else {
+			enabled = append(enabled, false)
+		}
+	}
+	return enabled
+}
+
+// DeriveSegmentToggles derives global toggles from per-instance enabled flags.
+func DeriveSegmentToggles(order []string, enabled []bool) SegmentToggles {
+	var toggles SegmentToggles
+	idx := 0
+	for _, name := range order {
+		if name == LineBreakMarker {
+			continue
+		}
+		isEnabled := false
+		if idx < len(enabled) {
+			isEnabled = enabled[idx]
+		}
+		idx++
+		if !isEnabled {
+			continue
+		}
+		if p := SegmentTogglePtr(&toggles, name); p != nil {
+			*p = true
+		}
+	}
+	return toggles
+}
+
 // LoadConfig loads configuration from ~/.claude/cchline/config.toml
 // Returns default configuration if file doesn't exist
 func LoadConfig() (*SimpleConfig, error) {
@@ -102,12 +180,11 @@ func LoadConfig() (*SimpleConfig, error) {
 		Segments: SegmentToggles{
 			Model:         true,
 			Directory:     true,
-			Git:           true,
 			ContextWindow: true,
 			Usage:         false,
 			Cost:          false,
 			Session:       false,
-			OutputStyle:   false,
+			OutputStyle:   true,
 			Update:        false,
 			// CCH Segments (disabled by default)
 			CCHModel:    false,
@@ -117,6 +194,7 @@ func LoadConfig() (*SimpleConfig, error) {
 			CCHLimits:   false,
 		},
 	}
+	config.SegmentEnabled = BuildSegmentEnabledFromToggles(config.SegmentOrder, config.Segments)
 
 	data, err := os.ReadFile(configPath)
 	if err != nil {
@@ -140,18 +218,13 @@ func LoadConfig() (*SimpleConfig, error) {
 	if len(config.SegmentOrder) == 0 {
 		config.SegmentOrder = make([]string, len(DefaultSegmentOrder))
 		copy(config.SegmentOrder, DefaultSegmentOrder)
-	} else {
-		// 检查是否有新增的 segment 未在 SegmentOrder 中
-		existingSegments := make(map[string]bool)
-		for _, s := range config.SegmentOrder {
-			existingSegments[s] = true
-		}
-		for _, s := range DefaultSegmentOrder {
-			if !existingSegments[s] {
-				config.SegmentOrder = append(config.SegmentOrder, s)
-			}
-		}
 	}
+
+	expectedEnabled := NonBreakSegmentCount(config.SegmentOrder)
+	if len(config.SegmentEnabled) != expectedEnabled {
+		config.SegmentEnabled = BuildSegmentEnabledFromToggles(config.SegmentOrder, config.Segments)
+	}
+	config.Segments = DeriveSegmentToggles(config.SegmentOrder, config.SegmentEnabled)
 
 	return config, nil
 }
