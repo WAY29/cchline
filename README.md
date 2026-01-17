@@ -1,5 +1,10 @@
 # CCHLine
 
+<p align="center">
+  <img src="images/image.png" width="48%" />
+  <img src="images/image2.png" width="48%" />
+</p>
+
 Claude Code 状态栏增强工具，用 Go 编写。
 
 > 本项目参考了 [CCometixLine](https://github.com/Haleclipse/CCometixLine) 的设计和代码结构，使用 Go 语言进行了重写。
